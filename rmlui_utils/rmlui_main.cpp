@@ -298,10 +298,6 @@ bool CRmlUI::Initialize(CreateInterfaceFn* factorylist, int nFactories)
 
     float scale = sqrt(scaleX * scaleY);
 
-    IRmlUiContext* context = CreateContext(RMLUI_ORDER_MAINMENU, "Test", RMLUI_SIZE_FULLSCREEN, m_iLastWidth, m_iLastHeight);
-    Rml::ElementDocument* doc = context->GetRmlContext()->LoadDocument("test.rml");
-    if (doc) doc->Show();
-
     FOR_EACH_VEC(m_Contexts, i)
     {
         Rml::Context* ctx = m_Contexts[i]->GetRmlContext();
