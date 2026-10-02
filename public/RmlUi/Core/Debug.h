@@ -37,7 +37,7 @@
 
 namespace Rml {
 
-bool RMLUICORE_API Assert(const char* message, const char* file, int line);
+bool RMLUICORE_API RmlAssert(const char* message, const char* file, int line);
 
 }
 
