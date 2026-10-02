@@ -20,7 +20,7 @@ import os
 import sys
 
 ANDROID_NDK_ENVVARS = ['ANDROID_NDK_HOME', 'ANDROID_NDK']
-ANDROID_NDK_SUPPORTED = [10, 19, 20]
+ANDROID_NDK_SUPPORTED = [10, 19, 20, 27]
 ANDROID_NDK_HARDFP_MAX = 11 # latest version that supports hardfp
 ANDROID_NDK_GCC_MAX = 17 # latest NDK that ships with GCC
 ANDROID_NDK_UNIFIED_SYSROOT_MIN = 15
@@ -188,10 +188,20 @@ class Android:
 
 	def gen_toolchain_path(self):
 		if self.is_clang():
-			triplet = '%s%d-' % (self.ndk_triplet(llvm_toolchain = True), self.api)
+			host = self.gen_host_toolchain()
+			base = os.path.join(self.ndk_home, 'toolchains', 'llvm', 'prebuilt', host, 'bin')
+
+			if self.is_arm():
+				triplet = 'armv7a-linux-androideabi%d-' % self.api
+			elif self.is_arm64():
+				triplet = 'aarch64-linux-android%d-' % self.api
+			else:
+				triplet = self.ndk_triplet() + '-'
+
+			return os.path.join(base, triplet)
 		else:
 			triplet = self.ndk_triplet() + '-'
-		return os.path.join(self.gen_gcc_toolchain_path(), 'bin', triplet)
+			return os.path.join(self.gen_gcc_toolchain_path(), 'bin', triplet)
 
 	def gen_binutils_path(self):
 		return os.path.join(self.gen_gcc_toolchain_path(), self.ndk_triplet(), 'bin')
