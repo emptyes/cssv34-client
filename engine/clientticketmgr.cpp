@@ -29,7 +29,7 @@ struct ticketdata_t
 };
 #define TICKET_SIZE sizeof(ticketdata_t)
 
-uint32 JSHash(const uint8* data, int size)
+uint32 JSHash(const char* data, int size)
 {
 	uint32 hash = 1315423911u;
 
