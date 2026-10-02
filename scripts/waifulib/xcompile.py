@@ -219,6 +219,9 @@ class Android:
 	def strip(self):
 		if self.is_host():
 			return 'llvm-strip'
+		if self.is_clang():
+			host = self.gen_host_toolchain()
+			return os.path.join(self.ndk_home, 'toolchains', 'llvm', 'prebuilt', host, 'bin', 'llvm-strip')
 		return os.path.join(self.gen_binutils_path(), 'strip')
 
 	def system_stl(self):
