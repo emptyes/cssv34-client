@@ -20,5 +20,5 @@ cd ..
 yes | sdkmanager --licenses > /dev/null 2>&1
 sdkmanager "platform-tools" "platforms;android-21" "build-tools;34.0.0" > /dev/null 2>&1
 
-./waf configure -T release --android=aarch64,clang,21 --togles --disable-warns --enable-speex --enable-opus --build-games=cstrike --prefix=./android_armv7a_build -vvv &&
+./waf configure -T release --android=armeabi-v7a,clang,21 --togles --disable-warns --enable-speex --enable-opus --build-games=cstrike --prefix=./android_armv7a_build -vvv &&
 ./waf install
