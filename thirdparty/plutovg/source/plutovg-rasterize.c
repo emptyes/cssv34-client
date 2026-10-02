@@ -15,7 +15,7 @@ void plutovg_span_buffer_init(plutovg_span_buffer_t* span_buffer)
 void plutovg_span_buffer_init_rect(plutovg_span_buffer_t* span_buffer, int x, int y, int width, int height)
 {
     plutovg_array_clear(span_buffer->spans);
-    plutovg_array_ensure(span_buffer->spans, height, plutovg_span_t);
+    plutovg_array_ensure(span_buffer->spans, height);
     plutovg_span_t* spans = span_buffer->spans.data;
     for(int i = 0; i < height; i++) {
         spans[i].x = x;
