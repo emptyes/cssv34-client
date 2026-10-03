@@ -711,6 +711,98 @@ void FX_MetalSpark( const Vector &position, const Vector &direction, const Vecto
 	FX_AddQuad( data );
 }
 
+void FX_Sparks_S( const Vector &position, const Vector &surfaceNormal, int iScale )
+{
+	//
+	// Simple version
+	//
+
+	VPROF_BUDGET( "FX_Sparks_S", VPROF_BUDGETGROUP_PARTICLE_RENDERING );
+
+	if ( g_Material_Spark == NULL )
+	{
+		g_Material_Spark = ParticleMgr()->GetPMaterial("effects/spark");
+	}
+
+	Vector	color;
+	color.Init( 1.0f, 1.0f, 1.0f );
+	
+	//
+	// Dust trail
+	//
+	Vector	offset = position + ( surfaceNormal * 2.0f );
+
+	SimpleParticle newParticle;
+
+	int i;
+	for ( i = 0; i < 2; i++ )
+	{
+		newParticle.m_Pos = offset;
+
+		newParticle.m_flLifetime	= 0.0f;
+		newParticle.m_flDieTime	= random->RandomFloat( 0.5f, 1.0f );
+
+		Vector dir;
+		dir[0] = surfaceNormal[0] + random->RandomFloat( -0.8f, 0.8f );
+		dir[1] = surfaceNormal[1] + random->RandomFloat( -0.8f, 0.8f );
+		dir[2] = surfaceNormal[2] + random->RandomFloat( -0.8f, 0.8f );
+
+		newParticle.m_uchStartSize	= random->RandomInt( 1, 1.5 ) * iScale;
+		newParticle.m_uchEndSize	= 0;
+
+		newParticle.m_vecVelocity = dir * random->RandomFloat( 24.0f, 48.0f )*(i+1);
+		newParticle.m_vecVelocity[2] -= random->RandomFloat( 8.0f, 32.0f )*(i+1);
+
+		newParticle.m_uchStartAlpha	= random->RandomInt( 100, 200 );
+		newParticle.m_uchEndAlpha	= 0;
+
+		newParticle.m_flRoll			= random->RandomFloat( 0, 360 );
+		newParticle.m_flRollDelta	= random->RandomFloat( -6, 6 );
+
+		float colorRamp = random->RandomFloat( 0.75f, 1.25f );
+
+		newParticle.m_uchColor[0] = MIN( 1.0f, color[0]*colorRamp ) * 255.0f;
+		newParticle.m_uchColor[1] = MIN( 1.0f, color[1]*colorRamp ) * 255.0f;
+		newParticle.m_uchColor[2] = MIN( 1.0f, color[2]*colorRamp ) * 255.0f;
+
+		AddSimpleParticle( &newParticle, g_Material_Spark );
+	}
+
+
+	for ( i = 0; i < 4; i++ )
+	{
+		newParticle.m_Pos = offset;
+
+		newParticle.m_flLifetime	= 0.0f;
+		newParticle.m_flDieTime	= random->RandomFloat( 0.25f, 0.5f );
+
+		Vector dir;
+		dir[0] = surfaceNormal[0] + random->RandomFloat( -0.8f, 0.8f );
+		dir[1] = surfaceNormal[1] + random->RandomFloat( -0.8f, 0.8f );
+		dir[2] = surfaceNormal[2] + random->RandomFloat( -0.8f, 0.8f );
+
+		newParticle.m_uchStartSize	= iScale;
+		newParticle.m_uchEndSize	= 0;
+
+		newParticle.m_vecVelocity = dir * random->RandomFloat( 8.0f, 32.0f );
+		newParticle.m_vecVelocity[2] -= random->RandomFloat( 8.0f, 64.0f );
+
+		newParticle.m_uchStartAlpha	= 255;
+		newParticle.m_uchEndAlpha	= 0;
+
+		newParticle.m_flRoll			= random->RandomFloat( 0, 360 );
+		newParticle.m_flRollDelta	= random->RandomFloat( -2.0f, 2.0f );
+
+		float colorRamp = random->RandomFloat( 0.75f, 1.25f );
+
+		newParticle.m_uchColor[0] = MIN( 1.0f, color[0]*colorRamp ) * 255.0f;
+		newParticle.m_uchColor[1] = MIN( 1.0f, color[1]*colorRamp ) * 255.0f;
+		newParticle.m_uchColor[2] = MIN( 1.0f, color[2]*colorRamp ) * 255.0f;
+
+		AddSimpleParticle( &newParticle, g_Material_Spark );
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Spark effect. Nothing but sparks.
 // Input  : &pos - origin point of effect
