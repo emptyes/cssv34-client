@@ -1165,7 +1165,7 @@ void FX_DustImpact( const Vector &origin, trace_t *tr, float flScale )
 	//
 	newParticle.m_Pos = offset;
 
-	newParticle.m_flLifetime		= 0.0f;
+	newParticle.m_flLifetime	= 0.0f;
 	newParticle.m_flDieTime		= random->RandomFloat( 1.0f, 1.5f );
 
 	Vector dir;
@@ -1174,7 +1174,7 @@ void FX_DustImpact( const Vector &origin, trace_t *tr, float flScale )
 	dir[2] = tr->plane.normal[2] + random->RandomFloat( -0.8f, 0.8f );
 
 	newParticle.m_uchStartSize	= random->RandomInt( 4, 8 );
-	newParticle.m_uchEndSize		= newParticle.m_uchStartSize * 4.0f;
+	newParticle.m_uchEndSize	= newParticle.m_uchStartSize * 4.0f;
 
 	newParticle.m_vecVelocity = dir * random->RandomFloat( 2.0f, 24.0f );
 	newParticle.m_vecVelocity[2] = random->RandomFloat( -2.0f, 2.0f );
@@ -1182,8 +1182,8 @@ void FX_DustImpact( const Vector &origin, trace_t *tr, float flScale )
 	newParticle.m_uchStartAlpha	= random->RandomInt( 100, 200 );
 	newParticle.m_uchEndAlpha	= 0;
 
-	newParticle.m_flRoll			= random->RandomFloat( 0, 360 );
-	newParticle.m_flRollDelta	= random->RandomFloat( -16, 16 );
+	newParticle.m_flRoll		= random->RandomFloat( 0, 360 );
+	newParticle.m_flRollDelta	= random->RandomFloat( -4, 4 );
 
 	float colorRamp = random->RandomFloat( 0.5f, 1.25f );
 
