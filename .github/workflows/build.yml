@@ -2,6 +2,9 @@ name: Build
 
 on: [push, workflow_dispatch]
 
+permissions:
+  contents: write
+
 jobs:
   build-windows-amd64:
     runs-on: windows-latest
@@ -17,18 +20,21 @@ jobs:
         python waf configure -T release --enable-speex --enable-opus --build-games=cstrike --prefix=./win64_build
         python waf install
 
-    - name: Upload game
-      uses: actions/upload-artifact@v4
-      with:
-        name: cssv34_win64_optimized
-        path: win64_build
-        if-no-files-found: error
-        retention-days: 30
+    - name: Pack game and debug symbols
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force pdb | Out-Null
+        $names = Get-ChildItem win64_build -Recurse -Include *.dll,*.exe | ForEach-Object { $_.BaseName }
+        Get-ChildItem build -Recurse -Filter *.pdb | Where-Object { $names -contains $_.BaseName } | ForEach-Object { Copy-Item $_.FullName pdb\ -Force }
+        Get-ChildItem pdb | Format-Table Name, Length
+        7z a -mx9 cssv34_win64_pdb.7z .\pdb\*
+        7z a -tzip cssv34_win64_optimized.zip .\win64_build\*
 
-    - name: Upload debug symbols (PDB)
-      uses: actions/upload-artifact@v4
+    - name: Publish release
+      uses: softprops/action-gh-release@v2
       with:
-        name: cssv34_win64_pdb
-        path: build/**/*.pdb
-        if-no-files-found: warn
-        retention-days: 90
+        tag_name: build-${{ github.run_number }}
+        name: Build ${{ github.run_number }}
+        files: |
+          cssv34_win64_optimized.zip
+          cssv34_win64_pdb.7z
