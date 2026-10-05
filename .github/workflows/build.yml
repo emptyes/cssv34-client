@@ -12,15 +12,23 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Build windows-amd64 (release + LTO)
+    - name: Build windows-amd64 (release)
       run: |
         python waf configure -T release --enable-speex --enable-opus --build-games=cstrike --prefix=./win64_build
         python waf install
 
-    - name: Upload artifacts
+    - name: Upload game
       uses: actions/upload-artifact@v4
       with:
         name: cssv34_win64_optimized
         path: win64_build
         if-no-files-found: error
         retention-days: 30
+
+    - name: Upload debug symbols (PDB)
+      uses: actions/upload-artifact@v4
+      with:
+        name: cssv34_win64_pdb
+        path: build/**/*.pdb
+        if-no-files-found: warn
+        retention-days: 90
