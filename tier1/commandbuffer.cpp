@@ -354,7 +354,7 @@ void CCommandBuffer::Compact()
 	// cost here since I expect to not have much to copy.
 	m_nArgSBufferSize = 0;
 
-	char pTempBuffer[ ARGS_BUFFER_LENGTH ];
+	char *pTempBuffer = (char *)malloc( ARGS_BUFFER_LENGTH ); // heap: buffer is too big for the stack
 	for ( intp i = m_Commands.Head(); i != m_Commands.InvalidIndex(); i = m_Commands.Next(i) )
 	{
 		Command_t &command = m_Commands[ i ];
@@ -368,6 +368,7 @@ void CCommandBuffer::Compact()
 	// between the two to avoid the 2nd memcpy; but again I'm guessing the memory
 	// tradeoff isn't worth it
 	memcpy( m_pArgSBuffer, pTempBuffer, m_nArgSBufferSize );
+	free( pTempBuffer );
 }
 
 
