@@ -1494,13 +1494,13 @@ bool CNetworkStringTableContainer::ReadStringTables( bf_read& buf )
 		Assert( table );
 
 		// Now read the data for the table
-		if ( table && !table->ReadStringTable( buf ) )
-		{
-			Host_Error( "Error reading string table %s\n", tablename );
-		}
-		else
+		if ( !table )
 		{
 			Warning( "Could not find table \"%s\"\n", tablename );
+		}
+		else if ( !table->ReadStringTable( buf ) )
+		{
+			Host_Error( "Error reading string table %s\n", tablename );
 		}
 	}
 

@@ -45,7 +45,7 @@ bool CClientModManager::CheckFragment(uint8 cmd, bf_read& buf, bf_read& fallback
 		int length = buf.ReadUBitLong(11);
 		int eventid = buf.ReadUBitLong(MAX_EVENT_BITS);
 		CGameEventDescriptor* descriptor = g_GameEventManager.GetEventDescriptor(eventid);
-		const char* name = descriptor->name;
+		const char* name = descriptor ? descriptor->name : NULL; // unknown event id: avoid null dereference crash
 
 		//DevMsg("svc_GameEvent: %s (%d)\n", name, eventid);
 

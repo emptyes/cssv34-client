@@ -63,7 +63,7 @@ END_NETWORK_TABLE()
 
 #if defined(CLIENT_DLL)
 BEGIN_PREDICTION_DATA( CWeaponFamas )
-DEFINE_PRED_FIELD( m_iBurstShotsRemaining, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
+DEFINE_PRED_FIELD( m_iBurstShotsRemaining, FIELD_INTEGER, 0 ) /* not networked by v34 servers: keep client-predicted value so the whole burst is predicted */,
 DEFINE_PRED_FIELD( m_fNextBurstShot, FIELD_FLOAT, 0 ),
 END_PREDICTION_DATA()
 #endif
