@@ -43,7 +43,7 @@ const float kTeamScoreLineLeadingRatio = 0.25f;	// padding as a ratio of avatar 
 // CT player data colors
 // ClientMod detection: real ClientMod clients put a marker into friendsID/friendsName
 // (player_info_t), which the server relays to every client via the userinfo string table.
-ConVar cl_scoreboard_show_clientmod( "cl_scoreboard_show_clientmod", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Show [CM] tag in scoreboard for ClientMod players" );
+ConVar cl_scoreboard_show_clientmod( "cl_scoreboard_show_clientmod", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Show CM in the CLIENT (ex-CLAN) scoreboard column for ClientMod players" );
 
 static bool IsClientModPlayer( int playerIndex )
 {
@@ -256,6 +256,28 @@ void CCSClientScoreBoardDialog::ApplySchemeSettings( vgui::IScheme *pScheme )
 	//
 
     LoadControlSettings( "Resource/UI/scoreboard.res" );
+
+	// Rename the "CLAN" column header: the column shows the client type (CM) instead.
+	if ( cl_scoreboard_show_clientmod.GetBool() )
+	{
+		static const wchar_t *s_ClanHeaders[] = { L"CLAN", L"Clan", L"clan", L"\x041A\x041B\x0410\x041D", L"\x041A\x043B\x0430\x043D" };
+		for ( int i = 0; i < GetChildCount(); i++ )
+		{
+			Label *pLabel = dynamic_cast< Label * >( GetChild( i ) );
+			if ( !pLabel )
+				continue;
+			wchar_t wszText[64];
+			pLabel->GetText( wszText, sizeof( wszText ) );
+			for ( int j = 0; j < ARRAYSIZE( s_ClanHeaders ); j++ )
+			{
+				if ( !V_wcscmp( wszText, s_ClanHeaders[j] ) )
+				{
+					pLabel->SetText( "CLIENT" );
+					break;
+				}
+			}
+		}
+	}
 
     //Just used for a background alpha value.  50% opacity
     m_listItemFont = pScheme->GetFont( "ScoreboardBody_1", IsProportional() );
@@ -852,13 +874,6 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 
 			const char* pUTF8Name = pPlayerScore->szName;
 
-			char szTaggedName[ MAX_PLAYER_NAME_LENGTH + 8 ];
-			if ( pUTF8Name && cl_scoreboard_show_clientmod.GetBool() && IsClientModPlayer( playerIndex ) )
-			{
-				V_snprintf( szTaggedName, sizeof( szTaggedName ), "[CM] %s", pUTF8Name );
-				pUTF8Name = szTaggedName;
-			}
-
 // 			int bufsize;
 // 			if ( g_PR->IsFakePlayer( playerIndex ) )
 // 				bufsize = strlen( oldName ) * 2 + 14 + 1;
@@ -893,6 +908,8 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 				if ( playerDisplay.pClanLabel != NULL )
 				{
 					const char* pUTF8Clan = pPlayerScore->szClanTag;
+					if ( cl_scoreboard_show_clientmod.GetBool() )
+						pUTF8Clan = IsClientModPlayer( playerIndex ) ? "CM" : "";
 					AdjustFontToFit( pUTF8Clan, playerDisplay.pClanLabel );
 
 					playerDisplay.pClanLabel->SetVisible( true );
