@@ -23,6 +23,7 @@
 #include "OptionsSubKeyboard.h"
 #include "OptionsSubMouse.h"
 #include "OptionsSubTouch.h"
+#include "OptionsSubExtra.h"
 #include "OptionsSubAudio.h"
 #include "OptionsSubVideo.h"
 #include "OptionsSubVoice.h"
@@ -108,6 +109,9 @@ COptionsDialog::COptionsDialog(vgui::Panel *parent) : PropertyDialog(parent, "Op
 		m_pOptionsSubMultiplayer = new COptionsSubMultiplayer(this);
 		AddPage(m_pOptionsSubMultiplayer, "#GameUI_Multiplayer");
 	}
+
+	// cssv34-client: extra settings (radar customization etc.)
+	AddPage(new COptionsSubExtra(this), EXTRA_STR_TAB);
 
 //	double s5 = system()->GetCurrentTime();
 //	Msg("COptionsDialog::COptionsDialog(): %.3fms\n", (float)(s5 - s4) * 1000.0f);
