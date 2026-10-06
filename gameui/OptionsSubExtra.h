@@ -12,6 +12,7 @@
 #endif
 
 #include <vgui_controls/PropertyPage.h>
+#include <vgui/VGUI.h>
 
 class CCvarToggleCheckButton;
 class CCvarSlider;
@@ -19,6 +20,8 @@ class CCvarSlider;
 namespace vgui
 {
 	class Label;
+	class ScrollBar;
+	class IScheme;
 }
 
 // UTF-8 strings (escaped so the source file is encoding-independent)
@@ -45,6 +48,10 @@ public:
 
 protected:
 	virtual void PerformLayout();
+	virtual void ApplySchemeSettings( vgui::IScheme *pScheme );
+	virtual void OnMouseWheeled( int delta );
+
+	MESSAGE_FUNC_INT( OnScrollBarMoved, "ScrollBarSliderMoved", position );
 
 	MESSAGE_FUNC_PTR( OnControlModified, "ControlModified", panel );
 	MESSAGE_FUNC_PTR( OnCheckButtonChecked, "CheckButtonChecked", panel )
@@ -57,6 +64,10 @@ private:
 
 	void UpdateValueLabels();
 
+	// Lays out all controls; returns full content height. yOffset = scroll position.
+	int LayoutContent( int x, int yOffset, int wide );
+	int LayoutCheckButton( CCvarToggleCheckButton *pCheck, const wchar_t *text, int x, int y, int wide );
+
 	vgui::Label					*m_pRadarHeader;
 	CCvarToggleCheckButton		*m_pRadarLocked;
 	vgui::Label					*m_pSliderCaption[NUM_SLIDERS];
@@ -65,6 +76,17 @@ private:
 
 	vgui::Label					*m_pScoreboardHeader;
 	CCvarToggleCheckButton		*m_pShowClientMod;
+
+	vgui::ScrollBar				*m_pScrollBar;
+	int							m_iContentTall;
+	vgui::HFont					m_hTickFont;
+
+	// original (unwrapped) texts, re-wrapped on every layout
+	wchar_t						m_wszRadarHeader[64];
+	wchar_t						m_wszRadarLocked[256];
+	wchar_t						m_wszSliderCaption[NUM_SLIDERS][128];
+	wchar_t						m_wszScoreboardHeader[64];
+	wchar_t						m_wszShowClientMod[256];
 };
 
 #endif // OPTIONS_SUB_EXTRA_H
