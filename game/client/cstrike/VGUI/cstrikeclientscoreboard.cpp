@@ -41,6 +41,37 @@ const float kTeamScoreMargin = 0.15f;			// margin as a ratio of avatar height
 const float kTeamScoreLineLeadingRatio = 0.25f;	// padding as a ratio of avatar height
 
 // CT player data colors
+// ClientMod detection: real ClientMod clients put a marker into friendsID/friendsName
+// (player_info_t), which the server relays to every client via the userinfo string table.
+ConVar cl_scoreboard_show_clientmod( "cl_scoreboard_show_clientmod", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Show [CM] tag in scoreboard for ClientMod players" );
+
+static bool IsClientModPlayer( int playerIndex )
+{
+	player_info_t pi;
+	if ( !engine->GetPlayerInfo( playerIndex, &pi ) )
+		return false;
+	if ( pi.fakeplayer || pi.ishltv )
+		return false;
+	return pi.friendsID != 0 && (unsigned char)pi.friendsName[0] == 0x08;
+}
+
+CON_COMMAND( cl_clientmod_list, "List players and their client type (ClientMod / Original)" )
+{
+	int cm = 0, total = 0;
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		player_info_t pi;
+		if ( !engine->GetPlayerInfo( i, &pi ) || pi.fakeplayer || pi.ishltv )
+			continue;
+		bool bCM = IsClientModPlayer( i );
+		total++;
+		if ( bCM )
+			cm++;
+		Msg( "%2d  %-10s %s\n", i, bCM ? "ClientMod" : "Original", pi.name );
+	}
+	Msg( "ClientMod: %d / %d\n", cm, total );
+}
+
 ConVar cl_scoreboard_ct_color_red( "cl_scoreboard_ct_color_red", "150", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data red channel", true, 0.0f, true, 255.0f );
 ConVar cl_scoreboard_ct_color_green( "cl_scoreboard_ct_color_green", "200", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data green channel", true, 0.0f, true, 255.0f );
 ConVar cl_scoreboard_ct_color_blue( "cl_scoreboard_ct_color_blue", "255", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data blue channel", true, 0.0f, true, 255.0f );
@@ -820,6 +851,13 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 			int playerIndex = pPlayerScore->playerIndex;
 
 			const char* pUTF8Name = pPlayerScore->szName;
+
+			char szTaggedName[ MAX_PLAYER_NAME_LENGTH + 8 ];
+			if ( pUTF8Name && cl_scoreboard_show_clientmod.GetBool() && IsClientModPlayer( playerIndex ) )
+			{
+				V_snprintf( szTaggedName, sizeof( szTaggedName ), "[CM] %s", pUTF8Name );
+				pUTF8Name = szTaggedName;
+			}
 
 // 			int bufsize;
 // 			if ( g_PR->IsFakePlayer( playerIndex ) )
