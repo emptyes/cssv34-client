@@ -15,6 +15,7 @@
 #include <vgui/ILocalize.h>
 #include <vgui_controls/Label.h>
 #include <vgui_controls/ScrollBar.h>
+#include <vgui_controls/CheckButton.h>
 #include "tier1/convar.h"
 #include <stdio.h>
 
@@ -180,6 +181,13 @@ COptionsSubExtra::COptionsSubExtra( vgui::Panel *parent ) : PropertyPage( parent
 	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_SB, m_wszScoreboardHeader, sizeof( m_wszScoreboardHeader ) );
 	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_CM, m_wszShowClientMod, sizeof( m_wszShowClientMod ) );
 
+	// Performance: client-only multithreading (doesn't affect the server / netcode)
+	m_pPerfHeader = new Label( this, "PerfHeader", EXTRA_STR_PERF );
+	m_pThreaded = new CheckButton( this, "Threaded", EXTRA_STR_THREADED );
+	m_bThreadedStart = false;
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_PERF, m_wszPerfHeader, sizeof( m_wszPerfHeader ) );
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_THREADED, m_wszThreaded, sizeof( m_wszThreaded ) );
+
 	// Vertical scrollbar, shown only if the content doesn't fit into the page
 	m_pScrollBar = new ScrollBar( this, "ExtraScrollBar", true );
 	m_pScrollBar->SetVisible( false );
@@ -202,7 +210,7 @@ void COptionsSubExtra::ApplySchemeSettings( IScheme *pScheme )
 	InvalidateLayout();
 }
 
-int COptionsSubExtra::LayoutCheckButton( CCvarToggleCheckButton *pCheck, const wchar_t *text, int x, int y, int wide )
+int COptionsSubExtra::LayoutCheckButton( CheckButton *pCheck, const wchar_t *text, int x, int y, int wide )
 {
 	// width of the check box image + its inset + gap before the text
 	int boxWide = 20, boxTall = 16;
@@ -299,6 +307,14 @@ int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 
 	y += LayoutCheckButton( m_pShowClientMod, m_wszShowClientMod, x, y - yOffset, wide );
 
+	// --- Performance ---
+	y += sectionGap;
+	h = ExtraApplyWrapped( m_pPerfHeader, m_wszPerfHeader, wide );
+	m_pPerfHeader->SetBounds( x, y - yOffset, wide, h + 2 );
+	y += h + 2 + rowGap;
+
+	y += LayoutCheckButton( m_pThreaded, m_wszThreaded, x, y - yOffset, wide );
+
 	y += MAX( 8, fontTall / 2 );
 	return y;
 }
@@ -379,6 +395,12 @@ void COptionsSubExtra::OnResetData()
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->Reset();
 	m_pShowClientMod->Reset();
+
+	ConVarRef cl_threaded_bone_setup( "cl_threaded_bone_setup", true );
+	ConVarRef r_threaded_renderables( "r_threaded_renderables", true );
+	m_bThreadedStart = cl_threaded_bone_setup.IsValid() && cl_threaded_bone_setup.GetBool() &&
+					   r_threaded_renderables.IsValid() && r_threaded_renderables.GetBool();
+	m_pThreaded->SetSelected( m_bThreadedStart );
 	UpdateValueLabels();
 }
 
@@ -388,6 +410,18 @@ void COptionsSubExtra::OnApplyChanges()
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->ApplyChanges();
 	m_pShowClientMod->ApplyChanges();
+
+	bool bThreaded = m_pThreaded->IsSelected();
+	if ( bThreaded != m_bThreadedStart )
+	{
+		ConVarRef cl_threaded_bone_setup( "cl_threaded_bone_setup", true );
+		ConVarRef r_threaded_renderables( "r_threaded_renderables", true );
+		if ( cl_threaded_bone_setup.IsValid() )
+			cl_threaded_bone_setup.SetValue( bThreaded ? 1 : 0 );
+		if ( r_threaded_renderables.IsValid() )
+			r_threaded_renderables.SetValue( bThreaded ? 1 : 0 );
+		m_bThreadedStart = bThreaded;
+	}
 }
 
 void COptionsSubExtra::OnControlModified( Panel *panel )
