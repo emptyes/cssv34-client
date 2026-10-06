@@ -849,7 +849,8 @@ void CInput::JoyStickMove( float frametime, CUserCmd *cmd )
 
 	angle = JoyStickAdjustYaw( angle );
 	viewangles[YAW] += angle;
-	cmd->mousedx = angle;
+	if ( angle != 0.f )
+		cmd->mousedx = angle; // don't wipe real mouse deltas when the stick is idle
 
 	// apply look control
 	if ( IsX360() || in_jlook.state & 1 )
@@ -865,7 +866,8 @@ void CInput::JoyStickMove( float frametime, CUserCmd *cmd )
 			angle = m_flPreviousJoystickPitch * joy_pitchsensitivity.GetFloat() * aspeed * 180.0;
 		}
 		viewangles[PITCH] += angle;
-		cmd->mousedy = angle;
+		if ( angle != 0.f )
+			cmd->mousedy = angle; // don't wipe real mouse deltas when the stick is idle
 		view->StopPitchDrift();
 		if( m_flPreviousJoystickPitch == 0.f && lookspring.GetFloat() == 0.f )
 		{

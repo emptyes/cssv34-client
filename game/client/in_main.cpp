@@ -998,6 +998,10 @@ if active == 1 then we are 1) not playing back demos ( where our commands are ig
 ================
 */
 
+// Mouse deltas accumulated by ExtraMouseSample() between usercmds
+static int s_nExtraMouseDX = 0;
+static int s_nExtraMouseDY = 0;
+
 void CInput::ExtraMouseSample( float frametime, bool active )
 {
 	CUserCmd dummy;
@@ -1030,6 +1034,9 @@ void CInput::ExtraMouseSample( float frametime, bool active )
 
 		// Allow mice and other controllers to add their inputs
 		ControllerMove( frametime, cmd );
+		// remember mouse movement applied to the view this frame so the next usercmd reports it
+		s_nExtraMouseDX += cmd->mousedx;
+		s_nExtraMouseDY += cmd->mousedy;
 #ifdef SIXENSE
 		g_pSixenseInput->SixenseFrame( frametime, cmd ); 
 
@@ -1139,6 +1146,14 @@ void CInput::CreateMove ( int sequence_number, float input_sample_frametime, boo
 
 		// Allow mice and other controllers to add their inputs
 		ControllerMove( input_sample_frametime, cmd );
+		// add mouse movement already consumed by per-frame ExtraMouseSample() calls
+		{
+			int dx = cmd->mousedx + s_nExtraMouseDX;
+			int dy = cmd->mousedy + s_nExtraMouseDY;
+			cmd->mousedx = (short)( dx > 32767 ? 32767 : ( dx < -32768 ? -32768 : dx ) );
+			cmd->mousedy = (short)( dy > 32767 ? 32767 : ( dy < -32768 ? -32768 : dy ) );
+		}
+		s_nExtraMouseDX = s_nExtraMouseDY = 0;
 #ifdef SIXENSE
 		g_pSixenseInput->SixenseFrame( input_sample_frametime, cmd ); 
 

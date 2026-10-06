@@ -564,7 +564,10 @@ void C_CSRagdoll::OnDataChanged( DataUpdateType_t type )
 		// until the first render. 
 		if ( engine->IsPlayingDemo() && m_bCreatedWhilePlaybackSkipping )
 		{
-			Release();
+			// cs_ragdoll is a networked entity: releasing it on the client breaks later
+			// delta updates ("CL_PreserveExistingEntity: missing client entity").
+			// Just hide it instead of deleting it.
+			AddEffects( EF_NODRAW );
 			return;
 		}
 
