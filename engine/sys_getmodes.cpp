@@ -62,6 +62,14 @@ typedef void *HDC;
 #include "cl_steamauth.h"
 #endif
 
+// Screenshots are encoded with stb_image_write: the prebuilt libjpeg.lib (v9) does not
+// match public/jpeglib headers (v8), and its error handler called exit() -> game froze on F5.
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBI_WRITE_NO_STDIO
+#include <stdio.h>
+#include "../thirdparty/stb/stb_image_write.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -2115,81 +2123,49 @@ GLOBAL(void) jpeg_UtlBuffer_dest (j_compress_ptr cinfo, CUtlBuffer *pBuffer )
 }
 #endif
 
+static void StbWriteToUtlBuffer( void *context, void *data, int size )
+{
+	( (CUtlBuffer *)context )->Put( data, size );
+}
+
 bool CVideoMode_Common::TakeSnapshotJPEGToBuffer( CUtlBuffer& buf, int quality )
 {
-#if !defined( _X360 ) && HAVE_JPEG
-    if ( g_LostVideoMemory )
-        return false;
+#if !defined( _X360 )
+	if ( g_LostVideoMemory )
+		return false;
 
-    // Validate quality level
-    quality = clamp( quality, 1, 100 );
+	// Validate quality level
+	quality = clamp( quality, 1, 100 );
 
-    // Allocate space for bits
-    uint8 *pImage = new uint8[ GetModeStereoWidth() * 3 * GetModeStereoHeight() ];
-    if ( !pImage )
-    {
-        Msg( "Unable to allocate %i bytes for image\n", GetModeStereoWidth() * 3 * GetModeStereoHeight() );
-        return false;
-    }
+	int width = GetModeStereoWidth();
+	int height = GetModeStereoHeight();
 
-    // Get Bits from the material system
-    ReadScreenPixels( 0, 0, GetModeStereoWidth(), GetModeStereoHeight(), pImage, IMAGE_FORMAT_RGB888 );
+	// Allocate space for bits
+	uint8 *pImage = new uint8[ width * 3 * height ];
+	if ( !pImage )
+	{
+		Msg( "Unable to allocate %i bytes for image\n", width * 3 * height );
+		return false;
+	}
 
-    JSAMPROW row_pointer[1];     // pointer to JSAMPLE row[s]
-    int row_stride;              // physical row width in image buffer
+	// Get Bits from the material system
+	ReadScreenPixels( 0, 0, width, height, pImage, IMAGE_FORMAT_RGB888 );
 
-    // stderr handler
-    struct jpeg_error_mgr jerr;
+	int ok = stbi_write_jpg_to_func( StbWriteToUtlBuffer, &buf, width, height, 3, pImage, quality );
 
-    // compression data structure
-    struct jpeg_compress_struct cinfo;
+	delete[] pImage;
 
-    row_stride = GetModeStereoWidth() * 3; // JSAMPLEs per row in image_buffer
-
-    // point at stderr
-    cinfo.err = jpeg_std_error(&jerr);
-
-    // create compressor
-    jpeg_CreateCompress((&cinfo), 90, (size_t)sizeof(struct jpeg_compress_struct));
-
-    // Hook CUtlBuffer to compression
-    jpeg_UtlBuffer_dest(&cinfo, &buf );
-
-    // image width and height, in pixels
-    cinfo.image_width = GetModeStereoWidth();
-    cinfo.image_height = GetModeStereoHeight();
-    // RGB is 3 componnent
-    cinfo.input_components = 3;
-    // # of color components per pixel
-    cinfo.in_color_space = JCS_RGB;
-
-    // Apply settings
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality, TRUE );
-
-    // Start compressor
-    jpeg_start_compress(&cinfo, TRUE);
-    
-    // Write scanlines
-    while ( cinfo.next_scanline < cinfo.image_height ) 
-    {
-        row_pointer[ 0 ] = &pImage[ cinfo.next_scanline * row_stride ];
-        jpeg_write_scanlines( &cinfo, row_pointer, 1 );
-    }
-
-    // Finalize image
-    jpeg_finish_compress(&cinfo);
-
-    // Cleanup
-    jpeg_destroy_compress(&cinfo);
-    
-    delete[] pImage;
-
+	if ( !ok )
+	{
+		Warning( "Failed to encode JPEG screenshot\n" );
+		return false;
+	}
+	return true;
 #else
-    // not supporting
-    Assert( 0 );
+	// not supporting
+	Assert( 0 );
+	return false;
 #endif
-    return true;
 }
 
 //-----------------------------------------------------------------------------

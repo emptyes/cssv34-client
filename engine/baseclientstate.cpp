@@ -740,7 +740,7 @@ void CBaseClientState::Disconnect( const char *pszReason, bool bShowMainMenu )
 
 	if ( m_NetChannel )
 	{
-		m_NetChannel->Shutdown( ( pszReason && *pszReason ) ? pszReason : "Disconnect by user." );
+		m_NetChannel->Shutdown( ( pszReason && *pszReason ) ? pszReason : "x64" );
 		m_NetChannel = NULL;
 	}
 }
