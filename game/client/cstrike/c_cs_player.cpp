@@ -1694,7 +1694,12 @@ void C_CSPlayer::UpdateClientSideAnimation()
 	// Update the animation data. It does the local check here so this works when using
 	// a third-person camera (and we don't have valid player angles).
 	if ( this == C_CSPlayer::GetLocalCSPlayer() )
-		m_PlayerAnimState->Update( EyeAngles()[YAW], m_angEyeAngles[PITCH] );
+	{
+		// m_angEyeAngles comes from the server, and updates are infrequent, so use the local values instead.
+		// Using the networked pitch made the third-person model lag or snap when looking up/down.
+		QAngle LocalEyeAngles = EyeAngles();
+		m_PlayerAnimState->Update( LocalEyeAngles[YAW], LocalEyeAngles[PITCH] );
+	}
 	else
 		m_PlayerAnimState->Update( m_angEyeAngles[YAW], m_angEyeAngles[PITCH] );
 
