@@ -51,8 +51,8 @@ private:
 	void SetupControlSettingsForErrorDisplay( const char *settingsFile );
 	void HideOtherDialogs( bool bHide );
 
-	vgui::ContinuousProgressBar	*m_pProgress;
-	vgui::ContinuousProgressBar *m_pProgress2;
+	vgui::ProgressBar	*m_pProgress;
+	vgui::ProgressBar	*m_pProgress2;
 	vgui::Label			*m_pInfoLabel;
 	vgui::Label			*m_pTimeRemainingLabel;
 	vgui::Button		*m_pCancelButton;

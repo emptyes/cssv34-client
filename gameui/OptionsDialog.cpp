@@ -58,7 +58,10 @@ COptionsDialog::COptionsDialog(vgui::Panel *parent) : PropertyDialog(parent, "Op
 
 	SetBounds(0, 0, w, h);
 
-	SetSizeable( false );
+	// Resizable like the console; the default size is the minimum so that
+	// the fixed-layout pages (keyboard, video, ...) never get clipped.
+	SetSizeable( true );
+	SetMinimumSize( w, h );
 
 	SetTitle("#GameUI_Options", true);
 

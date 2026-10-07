@@ -2869,6 +2869,16 @@ void CMatSystemSurface::SetCursor(HCursor hCursor)
 	if ( IsCursorLocked() )
 		return;
 
+	// cssv34-client: while some popup wants the mouse (demo UI on shift+F2, chat, ...)
+	// the cursor is free, so never make it invisible. Otherwise moving it off that
+	// popup over the game view (whose panels use dc_none) would hide the cursor and
+	// the user loses it. Mouse capture (e.g. drag-rotating a model) may still hide it;
+	// CalculateMouseVisible() hides it again as soon as nothing needs the mouse.
+	if ( hCursor == vgui::dc_none && m_bNeedsMouse && !input()->GetMouseCapture() )
+	{
+		hCursor = vgui::dc_arrow;
+	}
+
 	if ( _currentCursor != hCursor )
 	{
 		_currentCursor = hCursor;

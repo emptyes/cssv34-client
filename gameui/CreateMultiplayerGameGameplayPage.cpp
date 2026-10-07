@@ -244,7 +244,12 @@ void CCreateMultiplayerGameGameplayPage::LoadGameOptionsList()
 		}
 
 		pCtrl->pScrObj = pObj;
-		pCtrl->SetSize( 100, scheme()->GetProportionalScaledValue(28) );
+		// same row height as the other option lists (e.g. Multiplayer -> Advanced);
+		// scale only when the page itself is proportional (otherwise rows become huge)
+		int rowTall = 28;
+		if ( IsProportional() )
+			rowTall = scheme()->GetProportionalScaledValueEx( GetScheme(), rowTall );
+		pCtrl->SetSize( 100, rowTall );
 		//pCtrl->SetBorder( scheme()->GetBorder(1, "DepressedButtonBorder") );
 		m_pOptionsList->AddItem( pCtrl );
 

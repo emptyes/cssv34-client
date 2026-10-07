@@ -222,7 +222,14 @@ int COptionsSubExtra::LayoutCheckButton( CheckButton *pCheck, const wchar_t *tex
 	}
 
 	int textTall = ExtraApplyWrapped( pCheck, text, wide - boxWide - 6 );
-	int tall = MAX( textTall, boxTall ) + 6;
+
+	// Use the real (untruncated) content height of the button as well:
+	// multi-line text must never be clipped at the bottom of the page.
+	pCheck->SetWide( wide );
+	int contentWide = 0, contentTall = 0;
+	pCheck->GetContentSize( contentWide, contentTall );
+
+	int tall = MAX( MAX( textTall, contentTall ), boxTall ) + 8;
 	pCheck->SetBounds( x, y, wide, tall );
 	return tall;
 }
@@ -315,7 +322,8 @@ int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 
 	y += LayoutCheckButton( m_pThreaded, m_wszThreaded, x, y - yOffset, wide );
 
-	y += MAX( 8, fontTall / 2 );
+	// bottom padding: keeps the last (wrapped) line fully visible when scrolled down
+	y += MAX( 12, fontTall );
 	return y;
 }
 

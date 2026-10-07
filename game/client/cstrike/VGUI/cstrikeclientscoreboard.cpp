@@ -912,6 +912,9 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 						pUTF8Clan = IsClientModPlayer( playerIndex ) ? "CM" : "";
 					AdjustFontToFit( pUTF8Clan, playerDisplay.pClanLabel );
 
+					// "CM" belongs to the CLIENT column: center it under the header instead of
+					// right-aligning it against the nickname (looked like a name prefix).
+					playerDisplay.pClanLabel->SetContentAlignment( cl_scoreboard_show_clientmod.GetBool() ? Label::a_center : Label::a_east );
 					playerDisplay.pClanLabel->SetVisible( true );
 					playerDisplay.pClanLabel->SetText( pUTF8Clan );
 					playerDisplay.pClanLabel->SetBgColor( m_PlayerDataBgColor );
