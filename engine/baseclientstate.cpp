@@ -740,7 +740,7 @@ void CBaseClientState::Disconnect( const char *pszReason, bool bShowMainMenu )
 
 	if ( m_NetChannel )
 	{
-		m_NetChannel->Shutdown( ( pszReason && *pszReason ) ? pszReason : "x64" );
+		m_NetChannel->Shutdown( ( pszReason && *pszReason ) ? pszReason : "Disconnect by user." );
 		m_NetChannel = NULL;
 	}
 }
@@ -935,6 +935,9 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 							break;
 	
 	case A2A_PRINT:			{
+								// Read the text first: 'string' is uninitialized until then.
+								msg.ReadString(string, sizeof(string));
+
 								if (strstr(string, "Banned by server") != 0)
 								{
 									COM_ExplainDisconnection(true, "Banned by server");
@@ -943,7 +946,6 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 								}
 								if (cl_allow_remote_print.GetBool())
 								{
-									msg.ReadString(string, sizeof(string));
 									ConMsg("%s\n", string);
 								}
 							}

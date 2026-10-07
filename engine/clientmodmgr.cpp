@@ -107,8 +107,9 @@ bool CClientModManager::CheckFragment(uint8 cmd, bf_read& buf, bf_read& fallback
 		{
 			short Type = (short)buf.ReadUBitLong(16);
 			auto dataLength = buf.ReadUBitLong(16);
-			char databuf[4096];
-			buf.ReadBytes(databuf, dataLength);
+			// Skip the payload without copying it: dataLength comes from the server
+			// (up to 65535 bytes) and used to overflow a 4096-byte stack buffer.
+			buf.SeekRelative(dataLength * 8);
 			//DevMsg("svc_Menu Rejected: type %d dataLength %d\n", Type, dataLength);
 			return false;
 		}
