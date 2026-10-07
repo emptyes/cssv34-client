@@ -183,8 +183,10 @@ bool CWeaponCSBaseGun::Reload()
 	if (pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0)
 		return false;
 
-	pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.0f );
-
+	// cssv34-client: unzoom only when the reload really starts (below). Resetting the FOV
+	// here also ran with a full clip: the client predicted the unzoom every tick while R
+	// was held and the v34 server kept the scope, so the view flickered in/out of zoom
+	// (AWP, Scout, SG550, G3SG1, AUG, SG552).
 	int iResult = DefaultReload( GetMaxClip1(), GetMaxClip2(), ACT_VM_RELOAD );
 	if ( !iResult )
 		return false;
