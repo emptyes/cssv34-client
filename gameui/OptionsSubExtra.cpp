@@ -16,6 +16,7 @@
 #include <vgui_controls/Label.h>
 #include <vgui_controls/ScrollBar.h>
 #include <vgui_controls/CheckButton.h>
+#include <vgui_controls/TextImage.h>
 #include "tier1/convar.h"
 #include <stdio.h>
 
@@ -223,14 +224,23 @@ int COptionsSubExtra::LayoutCheckButton( CheckButton *pCheck, const wchar_t *tex
 
 	int textTall = ExtraApplyWrapped( pCheck, text, wide - boxWide - 6 );
 
-	// Use the real (untruncated) content height of the button as well:
-	// multi-line text must never be clipped at the bottom of the page.
-	pCheck->SetWide( wide );
-	int contentWide = 0, contentTall = 0;
-	pCheck->GetContentSize( contentWide, contentTall );
+	// A CheckButton is a Label with two images (box + text). For such labels
+	// Label::PerformLayout() never resizes the TextImage to its content, so
+	// after wrapping it stayed one line tall: the text block was centered as
+	// a single line and the 2nd line was clipped at the bottom of the button.
+	// Resize the TextImage to the wrapped text explicitly.
+	int imageTall = 0;
+	TextImage *pTextImage = pCheck->GetTextImage();
+	if ( pTextImage )
+	{
+		int imageWide = 0;
+		pTextImage->ResizeImageToContent();
+		pTextImage->GetSize( imageWide, imageTall );
+	}
 
-	int tall = MAX( MAX( textTall, contentTall ), boxTall ) + 8;
+	int tall = MAX( MAX( textTall, imageTall ), boxTall ) + 8;
 	pCheck->SetBounds( x, y, wide, tall );
+	pCheck->InvalidateLayout();
 	return tall;
 }
 

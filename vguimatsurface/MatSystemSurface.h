@@ -282,6 +282,7 @@ public:
 	virtual VPANEL GetTopmostPopup();
 	virtual void GetAbsoluteWindowBounds(int &x, int &y, int &wide, int &tall);
 	virtual void CalculateMouseVisible();
+	void UpdateForceCursorVisible( bool bForce );
 	virtual bool NeedKBInput();
 	virtual void SurfaceGetCursorPos(int &x, int &y);
 	virtual void SurfaceSetCursorPos(int x, int y);
@@ -498,6 +499,7 @@ private:
 
 	bool m_bNeedsKeyboard : 1;
 	bool m_bNeedsMouse : 1;
+	bool m_bForceCursorVisible : 1;	// cssv34-client: dc_alwaysvisible_push is active
 	bool m_bAllowJavaScript : 1;
 
 	int m_nLastInputPollCount;
