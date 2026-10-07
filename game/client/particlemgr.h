@@ -655,6 +655,11 @@ public:
 	// Draw the effects marked with SetDrawBeforeViewModel.
 	void			DrawBeforeViewModelEffects();
 
+	// cl_particle_fallback_draw: draw old-style (CParticleEffectBinding) effects
+	// together with the particle singletons instead of through the leaf system.
+	// Called from DrawParticleSingletons at the start of every translucent pass.
+	void			DrawFallbackEffects( bool bInSkybox );
+
 	// Returns the modelview matrix
 	VMatrix&		GetModelView();
 

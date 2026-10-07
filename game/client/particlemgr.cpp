@@ -42,6 +42,15 @@ ConVar r_DrawParticles("r_drawparticles", "1", FCVAR_CHEAT, "Enable/disable part
 static ConVar particle_simulateoverflow( "particle_simulateoverflow", "0", FCVAR_CHEAT, "Used for stress-testing particle systems. Randomly denies creation of particles." );
 ConVar cl_particleeffect_aabb_buffer( "cl_particleeffect_aabb_buffer", "2", FCVAR_CHEAT, "Add this amount to a particle effect's bbox in the leaf system so if it's growing slowly, it won't have to be reinserted as often." );
 ConVar cl_particle_show_bbox( "cl_particle_show_bbox", "0", FCVAR_CHEAT );
+
+// Workaround for #35: old-style particle effects (CSimpleEmitter & co: bullet impacts,
+// sparks, explosions...) are not visible when they are drawn through the leaf system,
+// while the same particles drawn by the particle singletons (DrawParticleSingletons) are.
+// With this enabled the effects are drawn the same way as the singletons.
+static ConVar cl_particle_fallback_draw( "cl_particle_fallback_draw", "0", FCVAR_ARCHIVE, "Draw old-style particle effects (impacts, sparks, explosions) like particle singletons instead of through the leaf system." );
+
+// true while the current translucent pass is the 3D skybox (set in DrawFallbackEffects)
+static bool s_bParticleFallbackSkyboxPass = false;
 ConVar cl_particle_show_bbox_cost( "cl_particle_show_bbox_cost", "0", FCVAR_CHEAT, "Show # of particles: green->blue->red. Use a negative number to show ALL particles even cheap ones" );
 
 // These reflect the convars so we don't parse the string every particle!
@@ -316,6 +325,14 @@ int CParticleEffectBinding::DrawModel( int flags )
 	//Avoid drawing particles while building depth textures. Perf win.
 	//At the very least, we absolutely should not do refraction updates below. So if this gets removed, be sure to wrap the refract/screen texture updates.
 	if( flags & ( STUDIO_SHADOWDEPTHTEXTURE | STUDIO_SSAODEPTHTEXTURE ) )
+	{
+		return 0;
+	}
+
+	// cl_particle_fallback_draw: this effect is drawn by CParticleMgr::DrawFallbackEffects,
+	// skip the leaf system draw (it always passes STUDIO_TRANSPARENCY) so it isn't drawn twice.
+	// The 3D skybox keeps the normal path.
+	if ( ( flags & STUDIO_TRANSPARENCY ) && cl_particle_fallback_draw.GetBool() && !s_bParticleFallbackSkyboxPass )
 	{
 		return 0;
 	}
@@ -1486,6 +1503,44 @@ void CParticleMgr::PostRender()
 
 		// Now that we've rendered, clear this flag so it'll simulate next frame.
 		pEffect->SetFlag( CParticleEffectBinding::FLAGS_FIRST_FRAME, false );	
+	}
+}
+
+
+void CParticleMgr::DrawFallbackEffects( bool bInSkybox )
+{
+	s_bParticleFallbackSkyboxPass = bInSkybox;
+
+	// World effects must not be drawn from the skybox camera.
+	if ( bInSkybox || !cl_particle_fallback_draw.GetBool() )
+		return;
+
+	VPROF_BUDGET( "CParticleMgr::DrawFallbackEffects", VPROF_BUDGETGROUP_PARTICLE_RENDERING );
+
+	float flBuffer = cl_particleeffect_aabb_buffer.GetFloat();
+
+	FOR_EACH_LL( m_Effects, i )
+	{
+		CParticleEffectBinding *pEffect = m_Effects[i];
+
+		// singletons and effects that draw themselves are handled elsewhere
+		if ( pEffect->GetRemoveFlag() || !pEffect->GetFlag( CParticleEffectBinding::FLAGS_DRAW_THRU_LEAF_SYSTEM ) )
+			continue;
+
+		if ( !pEffect->m_nActiveParticles )
+			continue;
+
+		// same bounds the leaf system uses, plus the reinsertion buffer
+		Vector mins, maxs;
+		pEffect->GetRenderBounds( mins, maxs );
+		const Vector &vOrigin = pEffect->GetRenderOrigin();
+		mins += vOrigin - Vector( flBuffer, flBuffer, flBuffer );
+		maxs += vOrigin + Vector( flBuffer, flBuffer, flBuffer );
+
+		if ( engine->CullBox( mins, maxs ) )
+			continue;
+
+		pEffect->DrawModel( STUDIO_RENDER );
 	}
 }
 

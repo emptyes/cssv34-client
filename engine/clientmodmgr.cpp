@@ -38,68 +38,72 @@ CClientModManager::~CClientModManager() {
 }
 
 // Check for exploits
+// buf/fallback point right after the message type. Returning false means the
+// message is dropped, so buf must be left exactly at the start of the next message.
 bool CClientModManager::CheckFragment(uint8 cmd, bf_read& buf, bf_read& fallback) 
 {
 	if (cmd == svc_GameEvent)
 	{
-		int length = buf.ReadUBitLong(11);
-		int eventid = buf.ReadUBitLong(MAX_EVENT_BITS);
+		// SVC_GameEvent: length (NETMSG_LENGTH_BITS) + event data (length bits)
+		int length = buf.ReadUBitLong(NETMSG_LENGTH_BITS);
+		if (buf.IsOverflowed() || length > buf.GetNumBitsLeft())
+		{
+			buf = fallback; // let ReadFromBuffer report the broken message
+			return true;
+		}
+
+		// inspect the event in a separate reader, never past this message
+		bf_read event = buf;
+		const int dataEndBit = buf.GetNumBitsRead() + length;
+		int eventid = event.ReadUBitLong(MAX_EVENT_BITS);
 		CGameEventDescriptor* descriptor = g_GameEventManager.GetEventDescriptor(eventid);
 		const char* name = descriptor ? descriptor->name : NULL; // unknown event id: avoid null dereference crash
 
 		//DevMsg("svc_GameEvent: %s (%d)\n", name, eventid);
 
+		bool reject = false;
+
 		if (name && !strcmp(name, "player_disconnect"))
 		{
-			short userid = buf.ReadWord();
+			short userid = (short)event.ReadWord();
 			char reason[1024];
-			buf.ReadString(reason, sizeof(reason));
-			char name[1024];
-			buf.ReadString(name, sizeof(name));
+			event.ReadString(reason, sizeof(reason));
+			char playername[1024];
+			event.ReadString(playername, sizeof(playername));
 			char networkid[1024];
-			buf.ReadString(networkid, sizeof(networkid));
-			//DevMsg("player_disconnect %d name %s reason %s networkid %s\n", userid, name, reason, networkid);
+			event.ReadString(networkid, sizeof(networkid));
+			//DevMsg("player_disconnect %d name %s reason %s networkid %s\n", userid, playername, reason, networkid);
 
-			char name_low[1024];
-			V_strcpy_safe(name_low, name);
-			V_strlower(name_low);
+			V_strlower(playername);
 
-			if (userid < 1 || strstr(name_low, "unconnected"))
-				return false;
+			if (userid < 1 || strstr(playername, "unconnected"))
+				reject = true;
 		}
-
-		if (name && !strcmp(name, "player_info"))
+		else if (name && !strcmp(name, "player_info"))
 		{
 			char databuf[1024];
-			buf.ReadString(databuf, sizeof(databuf));
+			event.ReadString(databuf, sizeof(databuf));
 
 			if (strstr(databuf, "{}") && strstr(databuf, "?"))
 			{
 				//DevMsg("player_info buffer %s\n", databuf);
-				buf.ReadString(databuf, sizeof(databuf));
-				return false;
+				reject = true;
 			}
 		}
 
-		buf = fallback;
-	}
-
-	if (cmd == svc_UserMessage)
-	{
-		auto msgType = buf.ReadByte();
-		auto dataLengthInBits = buf.ReadUBitLong(11);
-		assert(math::BitsToBytes(data->dataLengthInBits) <= MAX_USER_MSG_DATA);
-		char databuf[1024];
-		buf.ReadBits(databuf, dataLengthInBits);
-
-		if (msgType < 0)
+		if (reject)
 		{
-			//DevMsg("UserMsg Rejected: type %d dataLengthInBits %d\n", msgType, dataLengthInBits);
+			// skip the whole message, so the next one is parsed from the right bit
+			buf.Seek(dataEndBit);
 			return false;
 		}
 
 		buf = fallback;
 	}
+
+	// svc_UserMessage is not inspected here: buf is left untouched.
+	// (the old check "msgType < 0" could never be true for an unsigned byte,
+	// and its assert did not compile in debug builds)
 
 	if (!sv.IsActive())
 	{
