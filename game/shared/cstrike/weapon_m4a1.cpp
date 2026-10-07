@@ -38,6 +38,9 @@ public:
 	virtual bool Reload();
 	virtual void WeaponIdle();
 	virtual bool Holster( CBaseCombatWeapon *pSwitchingTo );
+	virtual void Drop( const Vector &vecVelocity );
+
+	virtual float GetInaccuracy() const;
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_M4A1; }
 
@@ -179,6 +182,41 @@ bool CWeaponM4A1::Holster( CBaseCombatWeapon *pSwitchingTo )
 	return BaseClass::Holster( pSwitchingTo );
 }
 
+void CWeaponM4A1::Drop( const Vector &vecVelocity )
+{
+	if ( m_flDoneSwitchingSilencer > 0.0f && m_flDoneSwitchingSilencer > gpGlobals->curtime )
+	{
+		// still switching the silencer.  Cancel the switch.
+		m_bSilencerOn = !m_bSilencerOn;
+		SetWeaponModelIndex( GetWorldModel() );
+	}
+
+	BaseClass::Drop( vecVelocity );
+}
+
+// v34 spread. CSBaseGunFire takes the spread from GetInaccuracy(), so without this
+// override the shots used the new accuracy model and went far off the crosshair.
+float CWeaponM4A1::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.035f + 0.4f * m_flAccuracy;
+		else if ( pPlayer->GetAbsVelocity().Length2D() > 140 )
+			return 0.035f + 0.07f * m_flAccuracy;
+		else if ( m_bSilencerOn )
+			return 0.025f * m_flAccuracy;
+		else
+			return 0.02f * m_flAccuracy;
+	}
+
+	return BaseClass::GetInaccuracy();
+}
+
 void CWeaponM4A1::SecondaryAttack()
 {
 	if ( m_bSilencerOn )
@@ -226,7 +264,7 @@ void CWeaponM4A1::PrimaryAttack()
 
 void CWeaponM4A1::M4A1Fire( float flSpread )
 {
-	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, m_bSilencerOn ? Secondary_Mode : Primary_Mode ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
 	if ( m_bSilencerOn )
