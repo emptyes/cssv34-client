@@ -110,6 +110,31 @@ void C_BaseViewModel::UncorrectViewModelAttachment( Vector &vOrigin )
 }
 
 
+#ifdef CSTRIKE_DLL
+//-----------------------------------------------------------------------------
+// Is this sound one of the active weapon's shot sounds (played by FX_FireBullets)?
+//-----------------------------------------------------------------------------
+bool C_BaseViewModel::IsWeaponShootSound( const char *pSound )
+{
+	if ( !pSound || !pSound[0] )
+		return false;
+
+	C_BaseCombatWeapon *pWeapon = GetActiveWeapon();
+	if ( !pWeapon )
+		return false;
+
+	static const WeaponSound_t s_ShootSounds[] = { SINGLE, SINGLE_NPC, WPN_DOUBLE, DOUBLE_NPC, BURST, SPECIAL1 };
+	for ( int i = 0; i < (int)ARRAYSIZE( s_ShootSounds ); i++ )
+	{
+		const char *pShootSound = pWeapon->GetShootSound( s_ShootSounds[i] );
+		if ( pShootSound && pShootSound[0] && !Q_stricmp( pShootSound, pSound ) )
+			return true;
+	}
+
+	return false;
+}
+#endif
+
 //-----------------------------------------------------------------------------
 // Purpose
 //-----------------------------------------------------------------------------
@@ -118,6 +143,13 @@ void C_BaseViewModel::FireEvent( const Vector& origin, const QAngle& angles, int
 	// We override sound requests so that we can play them locally on the owning player
 	if ( ( event == AE_CL_PLAYSOUND ) || ( event == CL_EVENT_SOUND ) )
 	{
+#ifdef CSTRIKE_DLL
+		// Some old CS:S viewmodels (P90) also have the shot sound as an animation event. The shot sound
+		// is already played by FX_FireBullets, so playing it here too made the shot sound doubled.
+		if ( IsWeaponShootSound( options ) )
+			return;
+#endif
+
 		// Only do this if we're owned by someone
 		if ( GetOwner() != NULL )
 		{

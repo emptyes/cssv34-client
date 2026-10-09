@@ -534,7 +534,11 @@ def configure(conf):
 			]
 		else:
 			linkflags += [
-				'/INCREMENTAL',
+				# /DEBUG implicitly turns on /OPT:NOREF and incremental linking,
+				# so drop unreferenced code explicitly. /OPT:ICF is not used on purpose:
+				# merging identical functions makes crash call stacks misleading
+				'/INCREMENTAL:NO',
+				'/OPT:REF',
 				'/NODEFAULTLIB:libc',
 				'/NODEFAULTLIB:libcd',
 				'/NODEFAULTLIB:libcmtd',

@@ -6,6 +6,7 @@
 //===========================================================================//
 
 #include "cbase.h"
+#include "c_baseplayer.h"
 #include "cdll_bounded_cvars.h"
 #include "convar_serverbounded.h"
 #include "tier0/icommandline.h"
@@ -123,13 +124,30 @@ public:
 static CBoundedCvar_Interp cl_interp_var;
 ConVar_ServerBounded *cl_interp = &cl_interp_var;
 
+// v34 servers don't send sv_client_min_interp_ratio, so cl_interp 0 / cl_interp_ratio 1-2 (10-20 ms) is allowed.
+// That is too little to smoothly watch another player: the camera jerks back for a frame. While spectating
+// we don't shoot, so a bigger interpolation costs nothing.
+static ConVar cl_spec_interp( "cl_spec_interp", "0.1", FCVAR_ARCHIVE, "Minimum interpolation amount while spectating (dead/spectator), 0 = use cl_interp.", true, 0.0f, true, 0.5f );
+
+static float GetSpectatorInterpAmount( float flInterp )
+{
+	if ( cl_spec_interp.GetFloat() <= flInterp )
+		return flInterp;
+
+	C_BasePlayer *pLocalPlayer = C_BasePlayer::GetLocalPlayer();
+	if ( !pLocalPlayer || pLocalPlayer->GetObserverMode() == OBS_MODE_NONE )
+		return flInterp;
+
+	return cl_spec_interp.GetFloat();
+}
+
 float GetClientInterpAmount()
 {
 	static const ConVar *pUpdateRate = g_pCVar->FindVar( "cl_updaterate" );
 	if ( pUpdateRate )
 	{
 		// #define FIXME_INTERP_RATIO
-		return MAX( cl_interp->GetFloat(), cl_interp_ratio->GetFloat() / pUpdateRate->GetFloat() );
+		return GetSpectatorInterpAmount( MAX( cl_interp->GetFloat(), cl_interp_ratio->GetFloat() / pUpdateRate->GetFloat() ) );
 	}
 	else
 	{

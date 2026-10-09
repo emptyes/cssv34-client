@@ -1769,7 +1769,10 @@ static ConVar mat_phong(			"mat_phong", "1" );
 static ConVar mat_parallaxmap(		"mat_parallaxmap", "1", FCVAR_HIDDEN | FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_reducefillrate(	"mat_reducefillrate", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 
-static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_ARCHIVE, "", true, -32, true, 8 );
+// Negative values only undo the LOD clamp stored in a VTF (each step doubles the clamp up to the real
+// texture size). A clamp is at least 2x2 and textures are at most 4096x4096, so -11 is already the maximum:
+// anything below it changes nothing.
+static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_ARCHIVE, "Texture detail: >0 lowers texture resolution, <0 removes VTF LOD clamps (-11 = no clamp).", true, -11, true, 8 );
 static ConVar mat_slopescaledepthbias_normal( "mat_slopescaledepthbias_normal", "0.0f", FCVAR_CHEAT );
 static ConVar mat_depthbias_normal( "mat_depthbias_normal", "0.0f", FCVAR_CHEAT | FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_slopescaledepthbias_decal( "mat_slopescaledepthbias_decal", "-0.5", FCVAR_CHEAT );		// Reciprocals of these biases sent to API

@@ -120,6 +120,9 @@ public:
 
 
 	virtual void			FireEvent( const Vector& origin, const QAngle& angles, int event, const char *options );
+#ifdef CSTRIKE_DLL
+	bool					IsWeaponShootSound( const char *pSound );
+#endif
 
 	virtual void			OnDataChanged( DataUpdateType_t updateType );
 	virtual void			PostDataUpdate( DataUpdateType_t updateType );
