@@ -704,6 +704,15 @@ void CNetGraphPanel::GetCommandInfo( INetChannelInfo *netchannel, cmdinfo_t *cmd
 //			0.0 - 
 //			avg - 
 //-----------------------------------------------------------------------------
+// Real update rate: the server may send fewer packets than cl_updaterate (sv_maxupdaterate)
+static float GetEffectiveUpdateRate( float flUpdateRate, float flAvgPacketIn )
+{
+	float flRate = flUpdateRate;
+	if ( flAvgPacketIn > 1.0f && flAvgPacketIn + 1.0f < flRate )
+		flRate = flAvgPacketIn + 1.0f;
+	return MAX( 1.0f, flRate );
+}
+
 void CNetGraphPanel::DrawTextFields( int graphvalue, int x, int y, int w, netbandwidthgraph_t *graph, cmdinfo_t *cmdinfo )
 {
 	if ( !net_graphtext.GetBool() )
@@ -766,14 +775,17 @@ void CNetGraphPanel::DrawTextFields( int graphvalue, int x, int y, int w, netban
 	if ( flInterp > 0.001f )
 	{
 		// Server framerate is lower than interp can possibly deal with
-		if ( m_flServerFramerate < ( 1.0f / flInterp ) )
+		// (v34 servers never report their framerate: m_flServerFramerate stays 0, so
+		// skip this check instead of always showing yellow)
+		if ( m_flServerFramerate > 0.0f && m_flServerFramerate < ( 1.0f / flInterp ) )
 		{
 			interpcolor[ 0 ] = 255;
 			interpcolor[ 1 ] = 255;
 			interpcolor[ 2 ] = 31;
 		}
-		// flInterp is below recommended setting!!!
-		else if ( flInterp < ( 2.0f / cl_updaterate->GetFloat() ) )
+		// flInterp is below recommended setting!!! (measured against the real packet
+		// rate: the server may send fewer updates than cl_updaterate, e.g. 66/s)
+		else if ( flInterp < ( 2.0f / GetEffectiveUpdateRate( cl_updaterate->GetFloat(), m_AvgPacketIn ) ) )
 		{
 			interpcolor[ 0 ] = 255;
 			interpcolor[ 1 ] = 125;
