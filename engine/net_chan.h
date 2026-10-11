@@ -229,7 +229,7 @@ private:
 	bool	CreateFragmentsFromFile( const char *filename, int stream, unsigned int transferID);
 
 	void	CompressFragments();
-	void	UncompressFragments( dataFragments_t *data );
+	bool	UncompressFragments( dataFragments_t *data );
 
 	bool	SendSubChannelData( bf_write &buf );
 	bool	ReadSubChannelData( bf_read &buf, int stream );

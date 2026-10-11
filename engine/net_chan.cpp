@@ -173,7 +173,7 @@ void CNetChan::CompressFragments()
 			unsigned int compressedSize = NET_MAX_PAYLOAD_V23;
 			char * compressedData = new char[ compressedSize ];
 
-			if ( BZ2_bzBuffToBuffCompress( compressedData, &compressedSize, data->buffer, data->bytes, 900, 0, 0 ) &&
+			if ( BZ2_bzBuffToBuffCompress( compressedData, &compressedSize, data->buffer, data->bytes, 9, 0, 30 ) == BZ_OK &&
 				( compressedSize < data->bytes ) )
 			{
 				compressTimer.End(); 
@@ -269,25 +269,35 @@ void CNetChan::CompressFragments()
 	}
 }
 
-void CNetChan::UncompressFragments( dataFragments_t *data )
+bool CNetChan::UncompressFragments( dataFragments_t *data )
 {
 	if ( !data->isCompressed )
-		return;
+		return true;
 
-	 // allocate buffer for uncompressed data, align to 4 bytes boundary
+	// reject absurd sizes from the network before allocating
+	if ( data->nUncompressedSize == 0 || data->nUncompressedSize > MAX_FILE_SIZE )
+		return false;
+
+	// allocate buffer for uncompressed data, align to 4 bytes boundary
 	char *newbuffer = new char[PAD_NUMBER( data->nUncompressedSize, 4 )];
 	unsigned int uncompressedSize = data->nUncompressedSize;
 
 	// uncompress data
-	BZ2_bzBuffToBuffDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
+	int result = BZ2_bzBuffToBuffDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
 
-	Assert( uncompressedSize == data->nUncompressedSize );
+	if ( result != BZ_OK || uncompressedSize != data->nUncompressedSize )
+	{
+		ConDMsg( "UncompressFragments: bad compressed data from %s (%d)\n", GetAddress(), result );
+		delete [] newbuffer;
+		return false;
+	}
 
 	// free old buffer and set new buffer
 	delete [] data->buffer;
 	data->buffer = newbuffer;
 	data->bytes = uncompressedSize;
 	data->isCompressed = false;
+	return true;
 }
 
 unsigned int CNetChan::RequestFile(const char *filename)
@@ -2183,9 +2193,9 @@ bool CNetChan::CheckReceivingList(int nList)
 	if ( net_showfragments.GetBool() )
 		Log_Msg(LOG_NETCHAN, "Receiving complete: %i fragments, %i bytes\n", data->numFragments, data->bytes );
 
-	if ( data->isCompressed )
+	if ( data->isCompressed && !UncompressFragments( data ) )
 	{
-		UncompressFragments( data );
+		return false;
 	}
 
 	if ( !data->filename[0] )

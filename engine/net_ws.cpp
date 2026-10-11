@@ -24,7 +24,7 @@ static ConVar net_showudp_wire( "net_showudp_wire", "0", 0, "Show incoming packe
 
 #define UDP_SO_RCVBUF_SIZE 131072
 
-static ConVar net_udp_rcvbuf( "net_udp_rcvbuf", NETSTRING( UDP_SO_RCVBUF_SIZE ), FCVAR_ALLOWED_IN_COMPETITIVE, "Default UDP receive buffer size", true, 8192, true, 128 * 1024 );
+static ConVar net_udp_rcvbuf( "net_udp_rcvbuf", NETSTRING( UDP_SO_RCVBUF_SIZE ), FCVAR_ALLOWED_IN_COMPETITIVE, "Default UDP receive buffer size", true, 8192, true, 1024 * 1024 );
 
 static ConVar net_showsplits( "net_showsplits", "0", 0, "Show info about packet splits" );
 static ConVar net_compresssplits("net_compresssplits", "1", 0, "Compress splitpacket parts before sending");
@@ -1359,7 +1359,14 @@ bool NET_GetLong(const int sock, netpacket_t* packet)
 			int decompressedSize = pCompressedHeader->decompressedSize;
 			int expectedCRC = pCompressedHeader->crc;
 
-			char* decompressBuffer = new char[NET_MAX_MESSAGE];
+			if (decompressedSize <= 0 || decompressedSize > NET_MAX_PAYLOAD)
+			{
+				NET_Error("Bad decompressed split packet size %d from %s\n", decompressedSize, packet->from.ToString());
+				return false;
+			}
+
+			// packet->data is a NET_MAX_MESSAGE scratch buffer, distinct from netsplit.buffer
+			char* decompressBuffer = (char*)packet->data;
 
 			unsigned int destLen = NET_MAX_MESSAGE;
 			int result = BZ2_bzBuffToBuffDecompress(
@@ -1372,20 +1379,16 @@ bool NET_GetLong(const int sock, netpacket_t* packet)
 			if (result != BZ_OK || destLen != decompressedSize)
 			{
 				NET_Error("Error decompressing split packet %d bytes from %s (%i)\n", entry->netsplit.totalSize, packet->from.ToString(), result);
-				delete[] decompressBuffer;
 				return false;
 			}
 
 			if (CRC32_ProcessSingleBuffer(decompressBuffer, decompressedSize) != expectedCRC)
 			{
 				NET_Error("Error decompressing split packet %d bytes from %s, crc's don't match\n", entry->netsplit.totalSize, packet->from.ToString());
-				delete[] decompressBuffer;
 				return false;
 			}
 
-			memcpy(packet->data, decompressBuffer, decompressedSize);
 			packet->size = decompressedSize;
-			delete[] decompressBuffer;
 
 			return true;
 		}
@@ -2238,24 +2241,32 @@ int NET_SendLong(INetChannel* chan, int sock, SOCKET s, const char FAR* buf, int
 	CNetChan* netchan = dynamic_cast<CNetChan*>(chan);
 
 	bool bCompress = net_compresssplits.GetBool() && (len > MAX_ROUTABLE_PAYLOAD);
-	char* sendbuf = new char[NET_MAX_PAYLOAD];
+	char* allocbuf = NULL;
+	const char* sendbuf = buf;	// uncompressed: send straight from caller's buffer
 	int sendlen = len;
 
 	if (bCompress)
 	{
-		SPLITPACKET_COMPRESSED* compressedHeader = (SPLITPACKET_COMPRESSED*)sendbuf;
+		allocbuf = new char[NET_MAX_PAYLOAD];
+		sendbuf = allocbuf;
+		SPLITPACKET_COMPRESSED* compressedHeader = (SPLITPACKET_COMPRESSED*)allocbuf;
 		compressedHeader->decompressedSize = len;
 		compressedHeader->crc = (int)CRC32_ProcessSingleBuffer(buf, len);
 
 		unsigned int destLen = NET_MAX_PAYLOAD - sizeof(SPLITPACKET_COMPRESSED);
-		BZ2_bzBuffToBuffCompress(
-			sendbuf + sizeof(SPLITPACKET_COMPRESSED),
+		if (BZ2_bzBuffToBuffCompress(
+			allocbuf + sizeof(SPLITPACKET_COMPRESSED),
 			&destLen, (char*)buf, len, 9, 0, 0
-		);
-		sendlen = destLen + sizeof(SPLITPACKET_COMPRESSED);
-	}
-	else {
-		memcpy(sendbuf, buf, len);
+		) == BZ_OK && (int)(destLen + sizeof(SPLITPACKET_COMPRESSED)) < len)
+		{
+			sendlen = destLen + sizeof(SPLITPACKET_COMPRESSED);
+		}
+		else
+		{
+			// compression failed or didn't help: fall back to plain split
+			bCompress = false;
+			sendbuf = buf;
+		}
 	}
 
 	int nSequenceNumber = ThreadInterlockedIncrement(&s_SplitPacketSequenceNumber[sock]);
@@ -2313,6 +2324,7 @@ int NET_SendLong(INetChannel* chan, int sock, SOCKET s, const char FAR* buf, int
 
 		if (ret < 0)
 		{
+			delete[] allocbuf;
 			return ret;
 		}
 
@@ -2343,7 +2355,7 @@ int NET_SendLong(INetChannel* chan, int sock, SOCKET s, const char FAR* buf, int
 			}
 		}
 	}
-	delete[] sendbuf;
+	delete[] allocbuf;
 	return nTotalBytesSent;
 }
 

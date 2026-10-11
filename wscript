@@ -521,7 +521,7 @@ def configure(conf):
 		]
 
 		if conf.options.TARGET32:
-			cflags += ['/arch:SSE']
+			cflags += ['/arch:SSE2']
 
 		if conf.options.BUILD_TYPE == 'debug':
 			linkflags += [
