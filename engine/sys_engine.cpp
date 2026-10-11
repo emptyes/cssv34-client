@@ -33,6 +33,13 @@
 #include "tier0/cpumonitoring.h"
 #ifndef SWDS
 #include "vgui_baseui_interface.h"
+
+#ifdef _WIN32
+// timeBeginPeriod/timeEndPeriod from WINMM (already linked); declared here to avoid
+// pulling <windows.h>/<mmsystem.h> into this file.
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod( unsigned int uPeriod );
+extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod( unsigned int uPeriod );
+#endif
 #endif
 #include "tier0/etwprof.h"
 
@@ -199,6 +206,10 @@ void CEngine::Unload( void )
 {
 	Sys_ShutdownGame();
 
+#ifdef _WIN32
+	timeEndPeriod( 1 );
+#endif
+
 	m_nDLLState			= DLL_INACTIVE;
 	m_nNextDLLState		= DLL_INACTIVE;
 }
@@ -210,6 +221,13 @@ void CEngine::Unload( void )
 bool CEngine::Load( bool bDedicated, const char *rootdir )
 {
 	bool success = false;
+
+#ifdef _WIN32
+	// Request 1 ms timer resolution. ThreadSleep() only does this when _WIN32_PC is
+	// defined, which this build never defines, so Sleep(1) in the fps_max limiter
+	// could oversleep up to ~15.6 ms -> uneven frame times (micro-stutter).
+	timeBeginPeriod( 1 );
+#endif
 
 	// Activate engine
 	// NOTE: We must bypass the 'next state' block here for initialization to work properly.
