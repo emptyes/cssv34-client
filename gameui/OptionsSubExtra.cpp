@@ -184,6 +184,8 @@ COptionsSubExtra::COptionsSubExtra( vgui::Panel *parent ) : PropertyPage( parent
 
 	// Performance: client-only multithreading (doesn't affect the server / netcode)
 	m_pPerfHeader = new Label( this, "PerfHeader", EXTRA_STR_PERF );
+	m_pSmokeV34 = new CCvarToggleCheckButton( this, "SmokeV34", EXTRA_STR_SMOKE, "cl_smoke_v34" );
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_SMOKE, m_wszSmokeV34, sizeof( m_wszSmokeV34 ) );
 	m_pThreaded = new CheckButton( this, "Threaded", EXTRA_STR_THREADED );
 	m_bThreadedStart = false;
 	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_PERF, m_wszPerfHeader, sizeof( m_wszPerfHeader ) );
@@ -331,6 +333,7 @@ int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 	y += h + 2 + rowGap;
 
 	y += LayoutCheckButton( m_pThreaded, m_wszThreaded, x, y - yOffset, wide );
+	y += LayoutCheckButton( m_pSmokeV34, m_wszSmokeV34, x, y - yOffset, wide );
 
 	// bottom padding: keeps the last (wrapped) line fully visible when scrolled down
 	y += MAX( 12, fontTall );
@@ -413,6 +416,7 @@ void COptionsSubExtra::OnResetData()
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->Reset();
 	m_pShowClientMod->Reset();
+	m_pSmokeV34->Reset();
 
 	ConVarRef cl_threaded_bone_setup( "cl_threaded_bone_setup", true );
 	ConVarRef r_threaded_renderables( "r_threaded_renderables", true );
@@ -428,6 +432,7 @@ void COptionsSubExtra::OnApplyChanges()
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->ApplyChanges();
 	m_pShowClientMod->ApplyChanges();
+	m_pSmokeV34->ApplyChanges();
 
 	bool bThreaded = m_pThreaded->IsSelected();
 	if ( bThreaded != m_bThreadedStart )

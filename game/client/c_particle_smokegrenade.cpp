@@ -253,6 +253,10 @@ static inline void WorldTraceLine( const Vector &start, const Vector &end, int c
 	#endif
 }
 
+// cl_smoke_v34 1: render smoke like the original v34 client (tinted by the map lighting,
+// not desaturated to grey) so it isn't denser than on regular v34/ClientMod clients.
+ConVar cl_smoke_v34( "cl_smoke_v34", "1", FCVAR_ARCHIVE, "Smoke grenade look: 1 = original v34 (map-tinted, like other v34 clients), 0 = newer grey/denser smoke" );
+
 static inline Vector EngineGetLightForPoint(const Vector &vPos)
 {
 	#if defined(PARTICLEPROTOTYPE_APP)
@@ -736,7 +740,8 @@ void C_ParticleSmokeGrenade::RenderParticles( CParticleRenderIterator *pIterator
 			// Lighting.
 			ApplyDynamicLight( renderPos, color );
 
-			color = (color + Vector( 0.5, 0.5, 0.5 )) / 2;   //Desaturate
+			if ( !cl_smoke_v34.GetBool() )
+				color = (color + Vector( 0.5, 0.5, 0.5 )) / 2;   //Desaturate (newer CS:S smoke)
 			
 			Vector tRenderPos;
 			TransformParticle(ParticleMgr()->GetModelView(), renderPos, tRenderPos);
