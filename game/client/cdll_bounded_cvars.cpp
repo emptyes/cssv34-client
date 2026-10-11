@@ -67,8 +67,8 @@ public:
 	CBoundedCvar_InterpRatio() :
 	  ConVar_ServerBounded( "cl_interp_ratio", 
 		  "2.0", 
-		  FCVAR_USERINFO /* | FCVAR_NOT_CONNECTED*/,
-		  "Sets the interpolation amount (final amount is cl_interp_ratio / cl_updaterate)." )
+		  FCVAR_USERINFO | FCVAR_ARCHIVE /* | FCVAR_NOT_CONNECTED*/,
+		  "Sets the interpolation amount (final amount is cl_interp_ratio / cl_updaterate). Used only when cl_interp is 0." )
 	  {
 	  }
 
@@ -101,7 +101,7 @@ public:
 	CBoundedCvar_Interp() :
 	  ConVar_ServerBounded( "cl_interp", 
 		  "0.1", 
-		  FCVAR_USERINFO /* | FCVAR_NOT_CONNECTED*/,
+		  FCVAR_USERINFO | FCVAR_ARCHIVE /* | FCVAR_NOT_CONNECTED*/,
 		  "Sets the interpolation amount (bounded on low side by server interp ratio settings).", true, 0.0f, true, 0.5f )
 	  {
 	  }
@@ -146,8 +146,15 @@ float GetClientInterpAmount()
 	static const ConVar *pUpdateRate = g_pCVar->FindVar( "cl_updaterate" );
 	if ( pUpdateRate )
 	{
-		// #define FIXME_INTERP_RATIO
-		return GetSpectatorInterpAmount( MAX( cl_interp->GetFloat(), cl_interp_ratio->GetFloat() / pUpdateRate->GetFloat() ) );
+		// v34 servers know nothing about cl_interp_ratio: lag compensation rewinds by the
+		// raw "cl_interp" userinfo value. If the client rendered with a different amount
+		// (e.g. MAX(cl_interp, ratio/updaterate)) the server would rewind players to the
+		// wrong position -> shots that hit on screen don't register.
+		// So when cl_interp is set (> 0) use exactly that, like the original v34 client.
+		float flInterp = cl_interp->GetFloat();
+		if ( flInterp <= 0.0f )
+			flInterp = cl_interp_ratio->GetFloat() / pUpdateRate->GetFloat();
+		return GetSpectatorInterpAmount( flInterp );
 	}
 	else
 	{
