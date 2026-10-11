@@ -117,6 +117,7 @@ protected:
 	bool			m_bIsPlayOnce : 1;
 	bool			m_bIsSentenceWord : 1;
 	bool			m_bCheckedForPendingSentence;
+	bool			m_bTriedHeaderSampleRate;	// sample rate already looked up from the MP3 frame header
 };
 
 //-----------------------------------------------------------------------------
