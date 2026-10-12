@@ -121,7 +121,8 @@ static const char *GetTimestampString( void )
 
 static ConVar con_trace( "con_trace", "0", FCVAR_MATERIAL_SYSTEM_THREAD, "Print console text to low level printout." );
 static ConVar con_notifytime( "con_notifytime","8", FCVAR_MATERIAL_SYSTEM_THREAD, "How long to display recent console text to the upper part of the game window" );
-static ConVar con_times("contimes", "8", FCVAR_MATERIAL_SYSTEM_THREAD, "Number of console lines to overlay for debugging." );
+static ConVar con_times("contimes", "16", FCVAR_MATERIAL_SYSTEM_THREAD, "Number of console lines to overlay for debugging." );
+static ConVar con_notifysize( "con_notifysize", "18", FCVAR_MATERIAL_SYSTEM_THREAD, "Size of the notify font.", true, 12.0f, true, 28.0f );
 static ConVar con_drawnotify( "con_drawnotify", "1", 0, "Disables drawing of notification area (for taking screenshots)." );
 static ConVar con_enable("con_enable", "0", FCVAR_ARCHIVE, "Allows the console to be activated.");
 static ConVar con_filter_enable ( "con_filter_enable","0", FCVAR_MATERIAL_SYSTEM_THREAD, "Filters console output based on the setting of con_filter_text. 1 filters completely, 2 displays filtered text brighter than other text." );
@@ -140,7 +141,7 @@ class CConPanel : public CBasePanel
 public:
 	enum
 	{
-		MAX_NOTIFY_TEXT_LINE = 256
+		MAX_NOTIFY_TEXT_LINE = 512
 	};
 
 					CConPanel( vgui::Panel *parent );
@@ -1308,6 +1309,12 @@ void CConPanel::ApplySchemeSettings( vgui::IScheme *pScheme )
 	// Console font
 	m_hFont = pScheme->GetFont( "DefaultSmallDropShadow", false );
 	m_hFontFixed = pScheme->GetFont( "DefaultFixedDropShadow", false );
+
+	const char* fontName = g_pVGuiSurface->GetFontName(m_hFont);
+	g_pVGuiSurface->SetFontGlyphSet(m_hFont, fontName, g_pVGuiSurface->GetFontTall(m_hFont)*1.2, 500, 0, 0, vgui::ISurface::FONTFLAG_NONE);
+
+	const char* fixedFontName = g_pVGuiSurface->GetFontName(m_hFontFixed);
+	g_pVGuiSurface->SetFontGlyphSet(m_hFontFixed, fixedFontName, con_notifysize.GetInt(), 500, 0, 0, vgui::ISurface::FONTFLAG_NONE);
 }
 
 int CConPanel::DrawText( vgui::HFont font, int x, int y, wchar_t *data )
@@ -1389,6 +1396,9 @@ void CConPanel::DrawNotify( void )
 	{
 		return;
 	}
+
+	const char* fontName = g_pVGuiSurface->GetFontName(m_hFontFixed);
+	g_pVGuiSurface->SetFontGlyphSet( m_hFontFixed, fontName, con_notifysize.GetInt(), 500, 0, 0, vgui::ISurface::FONTFLAG_NONE );
 
 	vgui::surface()->DrawSetTextFont( m_hFontFixed );
 

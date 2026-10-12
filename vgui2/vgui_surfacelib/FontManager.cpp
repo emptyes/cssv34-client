@@ -179,18 +179,21 @@ bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int 
 		}
 	}
 
-	// disabled for now (text is very small)
-#if 0
 	// Handle general substitution
 	for (int i = 0; g_FontSubstitutionTable[i].src != NULL; i++)
 	{
 		if ( !V_stricmp( pchFontName, g_FontSubstitutionTable[i].src ) )
 		{
 			pchFontName = g_FontSubstitutionTable[i].dst;
+
+			if (pchFontName == "Liberation Mono" || pchFontName == "Fira Sans")
+			{
+				tall *= 1.2;
+			}
+
 			break;
 		}
 	}
-#endif
 
 	font_t *winFont = CreateOrFindWin32Font( pchFontName, tall, weight, blur, scanlines, flags );
 

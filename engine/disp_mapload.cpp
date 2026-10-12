@@ -551,7 +551,7 @@ void UpdateDispBBoxes( model_t *pWorld, int nDisplacements )
 bool DispInfo_LoadDisplacements( model_t *pWorld, bool bRestoring )
 {
 	const MaterialSystem_SortInfo_t *pSortInfos = materialSortInfoArray;
-
+	
 	int nDisplacements = CMapLoadHelper::LumpSize( LUMP_DISPINFO ) / sizeof( ddispinfo_t );	
 	int nLuxels = CMapLoadHelper::LumpSize( LUMP_DISP_LIGHTMAP_ALPHAS );
 	int nSamplePositionBytes = CMapLoadHelper::LumpSize( LUMP_DISP_LIGHTMAP_SAMPLE_POSITIONS );

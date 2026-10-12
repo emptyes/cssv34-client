@@ -149,6 +149,7 @@ void CGameMenuItem::ApplySchemeSettings(IScheme *pScheme)
 	SetDefaultBorder(NULL);
 	SetDepressedBorder(NULL);
 	SetKeyFocusBorder(NULL);
+	SetProportional(true);
 
 	vgui::HFont hMainMenuFont = pScheme->GetFont( "MainMenuFont", IsProportional() );
 
@@ -338,10 +339,20 @@ public:
 	virtual void ApplySchemeSettings(IScheme *pScheme)
 	{
 		BaseClass::ApplySchemeSettings(pScheme);
+		SetProportional(true);
 
 		int height = atoi(pScheme->GetResourceString("MainMenu.MenuItemHeight"));
+
+		int heightProportional = scheme()->GetProportionalScaledValue(height);
+		
+		// Prevent too big spaces between menu items
+		if ((heightProportional * 10 / height) >= 30)
+			heightProportional *= 0.85;
+
 		if( IsProportional() )
-			height = scheme()->GetProportionalScaledValue( height );
+		{
+			height = heightProportional;
+		}
 
 		// make fully transparent
 		SetMenuItemHeight(height);

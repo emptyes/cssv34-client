@@ -32,7 +32,7 @@
 
 ConVar net_showudp( "net_showudp", "0", 0, "Dump UDP packets summary to console" );
 ConVar net_showtcp( "net_showtcp", "0", 0, "Dump TCP stream summary to console" );
-ConVar net_blocksize( "net_maxfragments", NETSTRING( MAX_ROUTABLE_PAYLOAD ), 0, "Max fragment bytes per packet", true, FRAGMENT_SIZE, true, MAX_ROUTABLE_PAYLOAD );
+ConVar net_blocksize( "net_maxfragments", "1280", 0, "Max fragment bytes per packet", true, FRAGMENT_SIZE, true, MAX_ROUTABLE_PAYLOAD);
 
 static ConVar net_showmsg( "net_showmsg", "0", 0, "Show incoming message: <0|1|name>" );
 static ConVar net_showfragments( "net_showfragments", "0", 0, "Show netchannel fragments" );
@@ -172,8 +172,9 @@ void CNetChan::CompressFragments()
 			// fragments data is in memory
 			unsigned int compressedSize = NET_MAX_PAYLOAD_V23;
 			char * compressedData = new char[ compressedSize ];
-
-			if ( BZ2_bzBuffToBuffCompress( compressedData, &compressedSize, data->buffer, data->bytes, 900, 0, 0 ) &&
+			
+			// blockSize100k: 9 (max compression), workFactor: 0x1Eu (default)
+			if ( BZ2_bzBuffToBuffCompress( compressedData, &compressedSize, data->buffer, data->bytes, 9, 0, 30 ) == BZ_OK &&
 				( compressedSize < data->bytes ) )
 			{
 				compressTimer.End(); 
@@ -274,14 +275,21 @@ void CNetChan::UncompressFragments( dataFragments_t *data )
 	if ( !data->isCompressed )
 		return;
 
-	 // allocate buffer for uncompressed data, align to 4 bytes boundary
+	// allocate buffer for uncompressed data, align to 4 bytes boundary
 	char *newbuffer = new char[PAD_NUMBER( data->nUncompressedSize, 4 )];
 	unsigned int uncompressedSize = data->nUncompressedSize;
 
 	// uncompress data
-	BZ2_bzBuffToBuffDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
+	int retVal = BZ2_bzBuffToBuffDecompress( 
+		newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
 
-	Assert( uncompressedSize == data->nUncompressedSize );
+	// client spoofed the file size or the fragments're just bad
+	if ( retVal != BZ_OK || uncompressedSize != data->nUncompressedSize )
+	{
+		DevMsg("Received corrupted bzip-compressed data from %s (%i).\n", GetAddress(), retVal);
+		delete[] newbuffer;
+		return;
+	}
 
 	// free old buffer and set new buffer
 	delete [] data->buffer;
