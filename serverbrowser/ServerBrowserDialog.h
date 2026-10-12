@@ -51,6 +51,19 @@ public:
 	// Adds a server to the list of favorites
 	void AddServerToFavorites(newgameserver_t &server);
 
+	// Favorites and history are kept in ServerBrowser.vdf ("Favorites" / "History"),
+	// so they work without Steam. Each entry: "name", "address", "lastplayed".
+	KeyValues *GetFavoritesData() { return m_pFavoritesData; }
+	KeyValues *GetHistoryData() { return m_pHistoryData; }
+	void RemoveServerFromFavorites( const netadr_t &adr );
+	void AddServerToHistory( const netadr_t &adr, const char *pszName );
+	void RemoveServerFromHistory( const netadr_t &adr );
+	// keeps the saved name up to date when a saved server answers
+	void UpdateSavedServerName( KeyValues *pList, const netadr_t &adr, const char *pszName );
+	// "Add current server" in the favorites tab
+	void AddCurrentServerToFavorites();
+	bool IsConnectedToServer() const { return m_bCurrentlyConnected && m_CurrentServerAdr.IsValid(); }
+
 	// begins the process of joining a server from a game list
 	// the game info dialog it opens will also update the game list
 	CDialogGameInfo *JoinGame(IGameList *gameList, newgameserver_t *pServer);
@@ -102,6 +115,11 @@ private:
 	MESSAGE_FUNC( OnLoadingStarted, "LoadingStarted" );
 
 	virtual bool GetDefaultScreenPosition(int &x, int &y, int &wide, int &tall);
+
+	KeyValues *FindSavedServer( KeyValues *pList, const netadr_t &adr );
+	const char *FindServerName( const netadr_t &adr );
+	void SaveServerLists();
+	void ReplaceSavedSubKey( KeyValues *pFile, KeyValues *pData );
 	virtual void ActivateBuildMode();
 
 	void OnKeyCodePressed( vgui::KeyCode code );
@@ -127,6 +145,8 @@ private:
 
 	KeyValues *m_pSavedData;
 	KeyValues *m_pFilterData;
+	KeyValues *m_pFavoritesData;
+	KeyValues *m_pHistoryData;
 
 	// context menu
 	CServerContextMenu *m_pContextMenu;
@@ -139,6 +159,7 @@ private:
 	// currently connected game
 	bool m_bCurrentlyConnected;
 	gameserveritem_t m_CurrentConnection;
+	netadr_t m_CurrentServerAdr;
 };
 
 // singleton accessor

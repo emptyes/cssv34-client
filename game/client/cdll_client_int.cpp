@@ -1098,6 +1098,13 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	HookHapticMessages(); // Always hook the messages
 #endif
 
+	// see SCR_Init(): RmlUi is only loaded with -rmlui
+	if ( !CommandLine()->FindParm( "-rmlui" ) )
+	{
+		rmlui = nullptr;
+		return true;
+	}
+
 	rmluimodule = Sys_LoadModule("rmlui_utils" DLL_EXT_STRING);
 	if (!rmluimodule)
 	{

@@ -108,11 +108,7 @@ CDialogAddServer::CDialogAddServer(vgui::Panel *parent, IGameList *gameList) : F
 //-----------------------------------------------------------------------------
 CDialogAddServer::~CDialogAddServer()
 {
-	FOR_EACH_VEC( m_Queries, i )
-	{
-		if ( steamapicontext->SteamMatchmakingServers() )
-			steamapicontext->SteamMatchmakingServers()->CancelServerQuery( m_Queries[ i ] );
-	}
+	g_pServersInfo->RemoveResponse( this, NULL );
 }
 
 //-----------------------------------------------------------------------------
@@ -203,9 +199,6 @@ void CDialogAddServer::OnOK()
 //-----------------------------------------------------------------------------
 void CDialogAddServer::TestServers()
 {
-	if ( !steamapicontext->SteamMatchmakingServers() )
-		return;
-
 	m_pDiscoveredGames->SetEmptyListText( "" );
 	m_pDiscoveredGames->RemoveAll();
 
@@ -215,7 +208,14 @@ void CDialogAddServer::TestServers()
 	netaddr.SetFromString( address, true );
 	
 	m_Servers.RemoveAll();
-	CUtlVector<netadr_t> vecAdress;
+	CUtlVector<netadr_t> &vecAdress = m_TestAddresses;
+	vecAdress.RemoveAll();
+
+	if ( !netaddr.IsBaseAdrValid() )
+	{
+		m_pDiscoveredGames->SetEmptyListText( "#ServerBrowser_ServerNotResponding" );
+		return;
+	}
 
 	if ( netaddr.GetPort() == 0 )
 	{
@@ -255,10 +255,18 @@ void CDialogAddServer::TestServers()
 	m_pTabPanel->AddPage( m_pDiscoveredGames, str );
 	m_pTabPanel->InvalidateLayout();
 	
-/*	FOR_EACH_VEC( vecAdress, iAddress )
+	FOR_EACH_VEC( vecAdress, iAddress )
 	{
-		m_Queries.AddToTail( steamapicontext->SteamMatchmakingServers()->PingServer( vecAdress[ iAddress ].GetIPHostByteOrder(), vecAdress[ iAddress ].GetPort(), this ) );
-	}*/
+		g_pServersInfo->PingServer( vecAdress[ iAddress ].GetIPHostByteOrder(), vecAdress[ iAddress ].GetPort(), this );
+	}
+
+	PostMessage( this, new KeyValues( "TestServersTimeout" ), 3.0f );
+}
+
+void CDialogAddServer::OnTestServersTimeout()
+{
+	if ( m_pDiscoveredGames->GetItemCount() == 0 )
+		ServerFailedToRespond();
 }
 
 
@@ -267,6 +275,17 @@ void CDialogAddServer::TestServers()
 //-----------------------------------------------------------------------------
 void CDialogAddServer::ServerResponded( newgameserver_t &server )
 {
+	// only the addresses we're testing
+	if ( m_TestAddresses.Find( server.m_NetAdr ) == m_TestAddresses.InvalidIndex() )
+		return;
+
+	// answer to a retry: already listed
+	FOR_EACH_VEC( m_Servers, i )
+	{
+		if ( m_Servers[i].m_NetAdr.CompareAdr( server.m_NetAdr ) )
+			return;
+	}
+
 	KeyValues *kv = new KeyValues( "Server" );
 
 	kv->SetString( "name", server.m_szServerName );

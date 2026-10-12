@@ -30,6 +30,35 @@ CHistoryGames::~CHistoryGames()
 //-----------------------------------------------------------------------------
 // Purpose: loads favorites list from disk
 //-----------------------------------------------------------------------------
+KeyValues *CHistoryGames::GetAddressList()
+{
+	return ServerBrowserDialog().GetHistoryData();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: fills the "Last played" column
+//-----------------------------------------------------------------------------
+void CHistoryGames::OnAddressListEntryAdded( KeyValues *pEntry, KeyValues *pRow )
+{
+	int nLastPlayed = pEntry->GetInt( "lastplayed", 0 );
+	pRow->SetInt( "LastPlayedTime", nLastPlayed );
+
+	char szTime[64] = "";
+	if ( nLastPlayed > 0 )
+	{
+		time_t t = (time_t)nLastPlayed;
+		struct tm *pTime = localtime( &t );
+		if ( pTime )
+			strftime( szTime, sizeof(szTime), "%d.%m.%Y %H:%M", pTime );
+	}
+	pRow->SetString( "LastPlayed", szTime );
+}
+
+void CHistoryGames::OnAddressListServerResponded( newgameserver_t &server )
+{
+	ServerBrowserDialog().UpdateSavedServerName( GetAddressList(), server.m_NetAdr, server.m_szServerName );
+}
+
 void CHistoryGames::LoadHistoryList()
 {
 	if ( m_bRefreshOnListReload )
@@ -99,18 +128,14 @@ void CHistoryGames::OnOpenContextMenu(int itemID)
 //-----------------------------------------------------------------------------
 void CHistoryGames::OnRemoveFromHistory()
 {
-	if ( !steamapicontext->SteamMatchmakingServers() || !steamapicontext->SteamMatchmaking() )
-		return;
+	// copy the selection first, removing rows changes it
+	CUtlVector<netadr_t> addresses;
+	GetSelectedAddresses( addresses );
 
-	// iterate the selection
-	for ( int i = m_pGameList->GetSelectedItemsCount() - 1; i >= 0; i-- )
+	FOR_EACH_VEC( addresses, i )
 	{
-		int itemID = m_pGameList->GetSelectedItem( i );
-		int serverID = m_pGameList->GetItemData(itemID)->userData;
-		
-		gameserveritem_t *pServer = steamapicontext->SteamMatchmakingServers()->GetServerDetails( m_hRequest, serverID );
-		if ( pServer )
-			steamapicontext->SteamMatchmaking()->RemoveFavoriteGame( pServer->m_nAppID, pServer->m_NetAdr.GetIP(), pServer->m_NetAdr.GetConnectionPort(), pServer->m_NetAdr.GetQueryPort(), k_unFavoriteFlagHistory );
+		ServerBrowserDialog().RemoveServerFromHistory( addresses[i] );
+		RemoveServerByAddress( addresses[i] );
 	}
 
 	UpdateStatus();	

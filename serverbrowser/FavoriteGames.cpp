@@ -28,9 +28,28 @@ CFavoriteGames::~CFavoriteGames()
 //-----------------------------------------------------------------------------
 // Purpose: loads favorites list from disk
 //-----------------------------------------------------------------------------
+KeyValues *CFavoriteGames::GetAddressList()
+{
+	return ServerBrowserDialog().GetFavoritesData();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: keep the saved name in sync with what the server reports
+//-----------------------------------------------------------------------------
+void CFavoriteGames::OnAddressListServerResponded( newgameserver_t &server )
+{
+	ServerBrowserDialog().UpdateSavedServerName( GetAddressList(), server.m_NetAdr, server.m_szServerName );
+}
+
+static bool FavoritesListIsEmpty()
+{
+	KeyValues *pList = ServerBrowserDialog().GetFavoritesData();
+	return !pList || !pList->GetFirstTrueSubKey();
+}
+
 void CFavoriteGames::LoadFavoritesList()
 {
-	if ( steamapicontext->SteamMatchmaking() && steamapicontext->SteamMatchmaking()->GetFavoriteGameCount() == 0 )
+	if ( FavoritesListIsEmpty() )
 	{
 		// set empty message
 		m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
@@ -76,7 +95,7 @@ bool CFavoriteGames::SupportsItem(InterfaceItem_e item)
 void CFavoriteGames::RefreshComplete( NServerResponse response )
 {
 	SetRefreshing(false);
-	if ( steamapicontext->SteamMatchmaking() && steamapicontext->SteamMatchmaking()->GetFavoriteGameCount() == 0 )
+	if ( FavoritesListIsEmpty() )
 	{
 		// set empty message
 		m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
@@ -122,22 +141,18 @@ void CFavoriteGames::OnOpenContextMenu(int itemID)
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnRemoveFromFavorites()
 {
-	if ( !steamapicontext->SteamMatchmakingServers() || !steamapicontext->SteamMatchmaking() )
-		return;
+	// copy the selection first, removing rows changes it
+	CUtlVector<netadr_t> addresses;
+	GetSelectedAddresses( addresses );
 
-	// iterate the selection
-	for ( int iGame = 0; iGame < m_pGameList->GetSelectedItemsCount(); iGame++ )
+	FOR_EACH_VEC( addresses, i )
 	{
-		int itemID = m_pGameList->GetSelectedItem( iGame );
-		int serverID = m_pGameList->GetItemData(itemID)->userData;
-		
-		gameserveritem_t *pServer = steamapicontext->SteamMatchmakingServers()->GetServerDetails( m_hRequest, serverID );
-		
-		if ( pServer )
-		{
-			steamapicontext->SteamMatchmaking()->RemoveFavoriteGame( pServer->m_nAppID, pServer->m_NetAdr.GetIP(), pServer->m_NetAdr.GetConnectionPort(), pServer->m_NetAdr.GetQueryPort(), k_unFavoriteFlagFavorite );
-		}
+		ServerBrowserDialog().RemoveServerFromFavorites( addresses[i] );
+		RemoveServerByAddress( addresses[i] );
 	}
+
+	if ( FavoritesListIsEmpty() )
+		m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
 
 	UpdateStatus();	
 	InvalidateLayout();
@@ -160,21 +175,8 @@ void CFavoriteGames::OnAddServerByName()
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnAddCurrentServer()
 {
-	gameserveritem_t *pConnected = ServerBrowserDialog().GetCurrentConnectedServer();
-
-	if ( pConnected && steamapicontext->SteamMatchmaking() )
-	{
-		steamapicontext->SteamMatchmaking()->AddFavoriteGame( pConnected->m_nAppID, pConnected->m_NetAdr.GetIP(), pConnected->m_NetAdr.GetConnectionPort(), pConnected->m_NetAdr.GetQueryPort(), k_unFavoriteFlagFavorite, time( NULL ) );
-		m_bRefreshOnListReload = true;
-
-		if ( GameSupportsReplay() )
-		{
-			// send command to propagate to the client so the client can send it on to the GC
-			char command[ 256 ];
-			Q_snprintf( command, Q_ARRAYSIZE( command ), "rfgc %s\n", pConnected->m_NetAdr.GetConnectionAddressString() );
-			g_pRunGameEngine->AddTextCommand( command );
-		}
-	}
+	// saves it and refreshes this tab
+	ServerBrowserDialog().AddCurrentServerToFavorites();
 }
 
 //-----------------------------------------------------------------------------
@@ -202,7 +204,7 @@ void CFavoriteGames::OnCommand(const char *command)
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnConnectToGame()
 {
-	m_pAddCurrentServer->SetEnabled( true );
+	m_pAddCurrentServer->SetEnabled( ServerBrowserDialog().IsConnectedToServer() );
 }
 
 //-----------------------------------------------------------------------------

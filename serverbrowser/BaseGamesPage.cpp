@@ -24,6 +24,9 @@ using namespace vgui;
 #define MAX_MAP_NAME	128
 const char *COM_GetModDirectory();
 
+#define ADDRESS_LIST_RETRY_TIME		1.0f	// re-ping servers that haven't answered yet
+#define ADDRESS_LIST_TIMEOUT		3.0f	// give up on servers that still haven't answered
+
 #undef wcscat
 
 ConVar sb_mod_suggested_maxplayers( "sb_mod_suggested_maxplayers", "0", FCVAR_HIDDEN );
@@ -139,6 +142,9 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	m_hFont = NULL;
 	m_eMatchMakingType = eType;
 	m_bFilterReplayServers = false;
+	m_bListRefreshing = false;
+	m_bAddressListRefreshing = false;
+	m_nAddressListSerial = 0;
 	SetDefLessFunc( m_mapServers );
 	SetDefLessFunc( m_mapServerIP );
 	SetDefLessFunc( m_mapGamesFilterItem );
@@ -246,11 +252,15 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 //-----------------------------------------------------------------------------
 CBaseGamesPage::~CBaseGamesPage()
 {
-	if ( m_hRequest )
+	// stop receiving ping answers, we may have registered in PingServer()
+	if ( g_pServersInfo )
+		g_pServersInfo->RemoveResponse( this, NULL );
+
+	if ( m_hRequest && steamapicontext->SteamMatchmakingServers() )
 	{
 		steamapicontext->SteamMatchmakingServers()->ReleaseRequest( m_hRequest );
-		m_hRequest = NULL;
 	}
+	m_hRequest = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -1548,11 +1558,7 @@ void CBaseGamesPage::OnCommand(const char *command)
 	}
 	else if ( !Q_stricmp(command, "refresh") )
 	{
-		if ( steamapicontext->SteamMatchmakingServers() )
-			steamapicontext->SteamMatchmakingServers()->RefreshQuery( m_hRequest );
-		SetRefreshing( true );
-		m_iServerRefreshCount = 0;
-		ClearQuickList();
+		StartRefresh();
 	}
 	else if (!Q_stricmp(command, "GetNewList"))
 	{
@@ -1629,21 +1635,18 @@ int CBaseGamesPage::GetSelectedItemsCount()
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::OnAddToFavorites()
 {
-/*	if ( !steamapicontext->SteamMatchmakingServers() )
-		return;
-
-	// loop through all the selected favorites
+	// loop through all the selected servers
 	for (int i = 0; i < m_pGameList->GetSelectedItemsCount(); i++)
 	{
 		int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
 
-		gameserveritem_t *pServer = steamapicontext->SteamMatchmakingServers()->GetServerDetails( m_hRequest, serverID );
+		newgameserver_t *pServer = GetServer( serverID );
 		if ( pServer )
 		{
 			// add to favorites list
 			ServerBrowserDialog().AddServerToFavorites(*pServer);
 		}
-	}*/
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1680,19 +1683,18 @@ void CBaseGamesPage::RemoveServer( serverdisplay_t &server )
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::OnRefreshServer( int serverID )
 {
-	if ( !steamapicontext->SteamMatchmakingServers() )
-		return;
-
 	// walk the list of selected servers refreshing them
 	for (int i = 0; i < m_pGameList->GetSelectedItemsCount(); i++)
 	{
-		int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
+		int iServer = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
 
-		// refresh this server
-		steamapicontext->SteamMatchmakingServers()->RefreshServer( m_hRequest, serverID );
+		newgameserver_t *pServer = GetServer( iServer );
+		if ( !pServer )
+			continue;
+
+		// the answer comes back through ServerResponded() and updates the row
+		g_pServersInfo->PingServer( pServer->m_NetAdr.GetIPHostByteOrder(), pServer->m_NetAdr.GetPort(), this );
 	}
-
-	SetRefreshing(IsRefreshing());
 }
 
 
@@ -1701,11 +1703,19 @@ void CBaseGamesPage::OnRefreshServer( int serverID )
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::StartRefresh()
 {
+	if ( GetAddressList() )
+	{
+		// favorites / history: ping our saved servers, no master server involved
+		StartAddressListRefresh();
+		return;
+	}
+
 	ClearServerList();
 	MatchMakingKeyValuePair_t *pFilters;
 	int nFilters = GetServerFilters( &pFilters );
 
 	m_serversInfo.SetCount(0);
+	m_bListRefreshing = true;
 
 /*	if ( m_hRequest )
 	{
@@ -1723,6 +1733,12 @@ void CBaseGamesPage::StartRefresh()
 	case eInternetServer:
 		g_pServersInfo->RequestInternetServerList(COM_GetModDirectory(), this);
 		//m_hRequest = steamapicontext->SteamMatchmakingServers()->RequestInternetServerList( GetFilterAppID().AppID(), &pFilters, nFilters, this );
+		break;
+	case eLANServer:
+		g_pServersInfo->RequestLANServerList(COM_GetModDirectory(), this);
+		break;
+	default:
+		m_bListRefreshing = false;
 		break;
 /*	case eSpectatorServer:
 		m_hRequest = steamapicontext->SteamMatchmakingServers()->RequestSpectatorServerList( GetFilterAppID().AppID(), &pFilters, nFilters, this );
@@ -1779,8 +1795,20 @@ void CBaseGamesPage::StopRefresh()
 	// clear update states
 	m_iServerRefreshCount = 0;
 
-	// Stop the server list refreshing
-	g_pServersInfo->StopRefresh();
+	if ( m_bAddressListRefreshing )
+	{
+		// marks the servers that haven't answered and updates the UI
+		FinishAddressListRefresh();
+		ApplyGameFilters();
+		return;
+	}
+
+	// Stop the server list refreshing, but only if it's ours (another tab may own it)
+	if ( m_bListRefreshing )
+	{
+		m_bListRefreshing = false;
+		g_pServersInfo->StopRefresh();
+	}
 
 	// update UI
 	RefreshComplete( nServerResponded );
@@ -1794,6 +1822,8 @@ void CBaseGamesPage::StopRefresh()
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::RefreshComplete( NServerResponse response )
 {
+	m_bListRefreshing = false;
+
 	//Force the connect button to recalculate its state.
 	OnItemSelected();
 }
@@ -1803,7 +1833,7 @@ void CBaseGamesPage::RefreshComplete( NServerResponse response )
 //-----------------------------------------------------------------------------
 bool CBaseGamesPage::IsRefreshing()
 {
-	return steamapicontext->SteamMatchmakingServers() && steamapicontext->SteamMatchmakingServers()->IsRefreshing( m_hRequest );
+	return m_bListRefreshing || m_bAddressListRefreshing;
 }
 
 //-----------------------------------------------------------------------------
@@ -2060,72 +2090,337 @@ void CBaseGamesPage::ServerResponded( newgameserver_t &server )
 {
 	Assert( server.m_NetAdr.GetIPHostByteOrder() != 0 );
 
-	newgameserver_t *pServerItem = &server;
-
-	// check filters
-	bool removeItem = false;
-#if 0
-	if ( !CheckPrimaryFilters( server ) )
+	// already listed (refresh of a single server, favorites/history ping): update the row
+	int iKnown = m_mapServerIP.Find( server.m_NetAdr );
+	if ( iKnown != m_mapServerIP.InvalidIndex() )
 	{
-		// server has been filtered at a primary level
-		// remove from lists
-		//pServer->m_bDoNotRefresh = true;
-
-		// remove from UI list
-		//removeItem = true;
+		UpdateServerRow( m_mapServerIP[iKnown], server );
 		return;
 	}
-	else if (!CheckSecondaryFilters( server ))
-	{
-		// we still ping this server in the future; however it is removed from UI list
+
+	// favorites / history only show their saved servers. Ping answers are sent
+	// to every listener, so this may be a server of another tab.
+	if ( GetAddressList() )
 		return;
-	}
-#endif
 
-	// new entry
-	KeyValues *kv = new KeyValues("Server");
+	// internet / LAN: new servers only come with the list we requested
+	if ( !m_bListRefreshing )
+		return;
 
-	kv->SetString("name", pServerItem->m_szServerName);
-	kv->SetString("map", pServerItem->m_szMap);
-	kv->SetString("GameDir", pServerItem->m_szGameDir);
-	kv->SetString("GameDesc", pServerItem->m_szGameDescription);
-	kv->SetInt("password", pServerItem->m_bPassword ? m_nImageIndexPassword : 0);
-	kv->SetInt("bots", pServerItem->m_nBotPlayers);
+	int iListID = AddServerRow( server );
+	if ( iListID == -1 )
+		return;
+
+	PrepareQuickListMap( &server, iListID );
+	UpdateStatus();
+	m_iServerRefreshCount++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: fills the list columns from the server info
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::FillServerKeyValues( KeyValues *kv, newgameserver_t &server )
+{
+	kv->SetString("name", server.m_szServerName[0] ? server.m_szServerName : server.m_NetAdr.ToString());
+	kv->SetString("map", server.m_szMap);
+	kv->SetString("GameDir", server.m_szGameDir);
+	kv->SetString("GameDesc", server.m_szGameDescription);
+	kv->SetInt("password", server.m_bPassword ? m_nImageIndexPassword : 0);
+
+	if ( server.m_bHadSuccessfulResponse )
+		kv->SetInt("bots", server.m_nBotPlayers);
+	else
+		kv->SetString("bots", "");
 
 	// Show secure icon
-	if (pServerItem->m_bSecure)
+	if (server.m_bSecure)
 		kv->SetInt("secure", m_nImageIndexSecure);
 	else
 		kv->SetInt("secure", 0);
 
-	kv->SetString( "IPAddr", pServerItem->m_NetAdr.ToString() );
+	kv->SetString( "IPAddr", server.m_NetAdr.ToString() );
 
-	int nAdjustedForBotsPlayers = max( 0, pServerItem->m_nPlayers - pServerItem->m_nBotPlayers );
+	int nAdjustedForBotsPlayers = max( 0, server.m_nPlayers - server.m_nBotPlayers );
 
-	char buf[32];
-	Q_snprintf(buf, sizeof(buf), "%d / %d", nAdjustedForBotsPlayers, pServerItem->m_nMaxPlayers );
-	kv->SetString("Players", buf);
+	if ( server.m_bHadSuccessfulResponse )
+	{
+		char buf[32];
+		Q_snprintf(buf, sizeof(buf), "%d / %d", nAdjustedForBotsPlayers, server.m_nMaxPlayers );
+		kv->SetString("Players", buf);
+		kv->SetInt("Ping", server.m_nPing);
+	}
+	else
+	{
+		kv->SetString("Players", "");
+		kv->SetString("Ping", "");
+	}
 
 	kv->SetInt("PlayerCount", nAdjustedForBotsPlayers );
-	kv->SetInt("MaxPlayerCount", pServerItem->m_nMaxPlayers );
+	kv->SetInt("MaxPlayerCount", server.m_nMaxPlayers );
 
-	kv->SetInt("Ping", pServerItem->m_nPing);
-
-	kv->SetString("Tags", pServerItem->m_szGameTags);
+	kv->SetString("Tags", server.m_szGameTags);
 
 	kv->SetInt("Replay", 0);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: adds a new row, returns the list item id
+//-----------------------------------------------------------------------------
+int CBaseGamesPage::AddServerRow( newgameserver_t &server, KeyValues *pExtra )
+{
+	if ( m_mapServerIP.Find( server.m_NetAdr ) != m_mapServerIP.InvalidIndex() )
+		return -1;
+
+	KeyValues *kv = new KeyValues("Server");
+	FillServerKeyValues( kv, server );
+
+	if ( pExtra )
+	{
+		for ( KeyValues *pValue = pExtra->GetFirstValue(); pValue; pValue = pValue->GetNextValue() )
+		{
+			if ( pValue->GetDataType() == KeyValues::TYPE_INT )
+				kv->SetInt( pValue->GetName(), pValue->GetInt() );
+			else
+				kv->SetString( pValue->GetName(), pValue->GetString() );
+		}
+	}
 
 	int iServerIndex = m_serversInfo.AddToTail( server );
 
 	// new server, add to list
 	int iListID = m_pGameList->AddItem(kv, iServerIndex, false, false);
-
 	m_pGameList->SetItemVisible( iListID, true );
 	kv->deleteThis();
 
-	PrepareQuickListMap( &server, iListID );
+	serverdisplay_t display;
+	display.m_iListID = iListID;
+	display.m_iServerID = iServerIndex;
+	display.m_bDoNotRefresh = false;
+	m_mapServers.Insert( iServerIndex, display );
+	m_mapServerIP.Insert( server.m_NetAdr, iServerIndex );
+
+	return iListID;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: a listed server answered again, refresh its row in place
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::UpdateServerRow( int iServerIndex, newgameserver_t &server )
+{
+	if ( !m_serversInfo.IsValidIndex( iServerIndex ) )
+		return;
+
+	newgameserver_t &dst = m_serversInfo[iServerIndex];
+	netadr_t adr = dst.m_NetAdr; // keep the address the row is known by
+	dst = server;
+	dst.m_NetAdr = adr;
+	dst.m_bHadSuccessfulResponse = true;
+
+	int iDisplay = m_mapServers.Find( iServerIndex );
+	if ( iDisplay != m_mapServers.InvalidIndex() )
+	{
+		int iListID = m_mapServers[iDisplay].m_iListID;
+		if ( m_pGameList->IsValidItemID( iListID ) )
+		{
+			KeyValues *kv = m_pGameList->GetItem( iListID );
+			FillServerKeyValues( kv, dst );
+			m_pGameList->ApplyItemChanges( iListID );
+		}
+	}
+
+	if ( GetAddressList() )
+	{
+		OnAddressListServerResponded( dst );
+
+		// everything answered: no need to wait for the timeout
+		if ( m_bAddressListRefreshing )
+		{
+			bool bAllResponded = true;
+			FOR_EACH_VEC( m_serversInfo, i )
+			{
+				if ( !m_serversInfo[i].m_bHadSuccessfulResponse && m_mapServers.Find( i ) != m_mapServers.InvalidIndex() )
+				{
+					bAllResponded = false;
+					break;
+				}
+			}
+
+			if ( bAllResponded )
+				FinishAddressListRefresh();
+		}
+	}
+
+	if ( IsVisible() && !IsRefreshing() )
+		m_pGameList->SortList();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: removes a row (favorites/history "remove" commands)
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::RemoveServerByAddress( const netadr_t &adr )
+{
+	int iKnown = m_mapServerIP.Find( adr );
+	if ( iKnown == m_mapServerIP.InvalidIndex() )
+		return;
+
+	int iServerIndex = m_mapServerIP[iKnown];
+	m_mapServerIP.RemoveAt( iKnown );
+
+	int iDisplay = m_mapServers.Find( iServerIndex );
+	if ( iDisplay != m_mapServers.InvalidIndex() )
+	{
+		int iListID = m_mapServers[iDisplay].m_iListID;
+		if ( m_pGameList->IsValidItemID( iListID ) )
+			m_pGameList->RemoveItem( iListID );
+
+		m_mapServers.RemoveAt( iDisplay );
+	}
+
 	UpdateStatus();
-	m_iServerRefreshCount++;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: addresses of the selected rows (copied, so rows can be removed afterwards)
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::GetSelectedAddresses( CUtlVector<netadr_t> &addresses )
+{
+	for ( int i = 0; i < m_pGameList->GetSelectedItemsCount(); i++ )
+	{
+		int iServer = m_pGameList->GetItemUserData( m_pGameList->GetSelectedItem( i ) );
+		newgameserver_t *pServer = GetServer( iServer );
+		if ( pServer )
+			addresses.AddToTail( pServer->m_NetAdr );
+	}
+}
+
+newgameserver_t *CBaseGamesPage::FindServerByAddress( const netadr_t &adr )
+{
+	int iKnown = m_mapServerIP.Find( adr );
+	if ( iKnown == m_mapServerIP.InvalidIndex() )
+		return NULL;
+
+	return GetServer( m_mapServerIP[iKnown] );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: favorites / history: show every saved server right away, then ping them
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::StartAddressListRefresh()
+{
+	StopRefresh();
+	ClearServerList();
+	m_serversInfo.RemoveAll();
+
+	KeyValues *pList = GetAddressList();
+
+	const wchar_t *pwszPinging = g_pVGuiLocalize->Find( "#ServerBrowser_PendingPing" );
+
+	for ( KeyValues *pEntry = pList->GetFirstTrueSubKey(); pEntry; pEntry = pEntry->GetNextTrueSubKey() )
+	{
+		netadr_t adr;
+		if ( !adr.SetFromString( pEntry->GetString( "address", "" ) ) || !adr.IsValid() )
+			continue;
+
+		newgameserver_t server;
+		memset( &server, 0, sizeof(server) );
+		server.m_NetAdr = adr;
+		server.m_nPing = 9999; // unanswered servers sort last
+		Q_strncpy( server.m_szServerName, pEntry->GetString( "name", adr.ToString() ), sizeof(server.m_szServerName) );
+
+		KeyValues *pExtra = new KeyValues( "Extra" );
+		OnAddressListEntryAdded( pEntry, pExtra );
+
+		int iListID = AddServerRow( server, pExtra );
+		pExtra->deleteThis();
+
+		if ( iListID != -1 && pwszPinging )
+		{
+			KeyValues *kv = m_pGameList->GetItem( iListID );
+			kv->SetWString( "GameDesc", pwszPinging );
+			m_pGameList->ApplyItemChanges( iListID );
+		}
+	}
+
+	UpdateStatus();
+
+	if ( m_mapServerIP.Count() == 0 )
+	{
+		RefreshComplete( nServerResponded );
+		return;
+	}
+
+	m_bAddressListRefreshing = true;
+	m_nAddressListSerial++;
+	SetRefreshing( true );
+
+	PingAddressListServers( false );
+
+	PostMessage( this, new KeyValues( "AddressListRetry", "serial", m_nAddressListSerial ), ADDRESS_LIST_RETRY_TIME );
+	PostMessage( this, new KeyValues( "AddressListTimeout", "serial", m_nAddressListSerial ), ADDRESS_LIST_TIMEOUT );
+}
+
+void CBaseGamesPage::PingAddressListServers( bool bOnlyUnanswered )
+{
+	FOR_EACH_MAP_FAST( m_mapServerIP, i )
+	{
+		newgameserver_t *pServer = GetServer( m_mapServerIP[i] );
+		if ( !pServer )
+			continue;
+
+		if ( bOnlyUnanswered && pServer->m_bHadSuccessfulResponse )
+			continue;
+
+		g_pServersInfo->PingServer( pServer->m_NetAdr.GetIPHostByteOrder(), pServer->m_NetAdr.GetPort(), this );
+	}
+}
+
+void CBaseGamesPage::OnAddressListRetry( int serial )
+{
+	if ( !m_bAddressListRefreshing || serial != m_nAddressListSerial )
+		return;
+
+	// UDP can be lost: ask once more those that haven't answered
+	PingAddressListServers( true );
+}
+
+void CBaseGamesPage::OnAddressListTimeout( int serial )
+{
+	if ( !m_bAddressListRefreshing || serial != m_nAddressListSerial )
+		return;
+
+	FinishAddressListRefresh();
+}
+
+void CBaseGamesPage::FinishAddressListRefresh()
+{
+	if ( !m_bAddressListRefreshing )
+		return;
+
+	m_bAddressListRefreshing = false;
+	m_nAddressListSerial++;
+
+	// mark servers that never answered
+	const wchar_t *pwszNoResponse = g_pVGuiLocalize->Find( "#ServerBrowser_ServerNotResponding" );
+
+	FOR_EACH_MAP_FAST( m_mapServers, i )
+	{
+		serverdisplay_t &display = m_mapServers[i];
+		newgameserver_t *pServer = GetServer( display.m_iServerID );
+		if ( !pServer || pServer->m_bHadSuccessfulResponse )
+			continue;
+
+		if ( !m_pGameList->IsValidItemID( display.m_iListID ) )
+			continue;
+
+		KeyValues *kv = m_pGameList->GetItem( display.m_iListID );
+		if ( pwszNoResponse )
+			kv->SetWString( "GameDesc", pwszNoResponse );
+		else
+			kv->SetString( "GameDesc", "" );
+		m_pGameList->ApplyItemChanges( display.m_iListID );
+	}
+
+	RefreshComplete( nServerResponded );
 }
 
 //-----------------------------------------------------------------------------

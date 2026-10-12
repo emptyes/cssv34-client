@@ -21,6 +21,8 @@
 #include "utlmap.h"
 #include "net_ws_headers.h"
 #include "sv_steamauth.h"
+#include "tier1/KeyValues.h"
+#include "filesystem_engine.h"
 
 extern ConVar sv_tags;
 extern ConVar sv_visiblemaxplayers;
@@ -35,6 +37,16 @@ extern ConVar sv_lan;
 #define RETRY_INFO_REQUEST_TIME 0.4 // seconds
 #define MASTER_RESPONSE_TIMEOUT 1.5 // seconds
 #define INFO_REQUEST_TIMEOUT 5.0 // seconds
+
+#define LAN_BROADCAST_RETRY_TIME 0.5 // seconds
+#define LAN_REFRESH_TIMEOUT 1.5 // seconds
+#define LAN_FIRST_PORT 27015
+#define LAN_LAST_PORT 27020
+
+// Built-in master server, always queried in addition to cfg/MasterServers.vdf
+#define DEFAULT_MASTER_SERVER "78.154.103.37:10232"
+#define MASTER_SERVERS_FILE "cfg/MasterServers.vdf"
+#define MAX_MASTER_SERVERS 16
 
 #ifdef DEDICATED
 #define IsLan() false
@@ -71,6 +83,19 @@ public:
 	void RequestServerInfo( const netadr_t &adr );
 	void StopRefresh();
 
+	// master server list (cfg/MasterServers.vdf + built-in default)
+	void LoadMasterServers();
+	void AddMasterServer( const char *pszAddress );
+	bool IsMasterServer( const netadr_t &adr ) const;
+	void SendMasterQuery( const netadr_t &master, const char *pszStartAddress );
+	void SendMasterQueries();
+
+	// LAN
+	void BroadcastLanQuery();
+
+	// a new list request replaces the current one: let the old listener finish its UI state
+	void BeginListRefresh( IServerListResponse *response );
+
 	void PingServer(uint32 unIP, uint16 usPort, IServerPingResponse* pRequestServersResponse);
 	void PlayerDetails(uint32 unIP, uint16 usPort, IServerPlayersResponse* pRequestServersResponse);
 	virtual void RemoveResponse(IServerPingResponse* resp, IServerPlayersResponse* resp2);
@@ -93,6 +118,14 @@ private:
 
 	CUtlVector<IServerPingResponse*> m_ServerPings;
 	CUtlVector<IServerPlayersResponse*> m_ServerPlayers;
+
+	// servers we've asked for A2S_PLAYER, so a S2C_CHALLENGE reply can be answered correctly
+	CUtlMap<netadr_t, bool> m_PendingPlayerRequests;
+
+	CUtlVector<netadr_t> m_MasterServers;
+
+	bool m_bLanRefresh;
+	double m_flLanBroadcastTime;
 
 	IServerListResponse *m_serverListResponse;
 };
@@ -117,7 +150,10 @@ CMaster::CMaster( void )
 	m_serverListResponse = NULL;
 	SetDefLessFunc( m_serverAddresses );
 	SetDefLessFunc( m_serversRequestTime );
+	SetDefLessFunc( m_PendingPlayerRequests );
 	m_bRefreshing = false;
+	m_bLanRefresh = false;
+	m_flLanBroadcastTime = 0.0;
 
 	Init();
 }
@@ -162,11 +198,34 @@ void CMaster::RunFrame()
 	if( !m_bRefreshing )
 		return;
 
+	if( m_bLanRefresh )
+	{
+		if( m_flStartRequestTime < Plat_FloatTime() - LAN_REFRESH_TIMEOUT )
+		{
+			StopRefresh();
+			m_serverListResponse->RefreshComplete( NServerResponse::nServerResponded );
+			return;
+		}
+
+		// UDP broadcast can be lost, send it once more
+		if( m_flRetryRequestTime < Plat_FloatTime() - LAN_BROADCAST_RETRY_TIME )
+		{
+			m_flRetryRequestTime = Plat_FloatTime();
+			BroadcastLanQuery();
+		}
+		return;
+	}
+
 	if( m_serverListResponse &&
 		m_flStartRequestTime < Plat_FloatTime()-INFO_REQUEST_TIMEOUT )
 	{
+		// partial results are still a valid list, only report a failure when the masters never answered
+		NServerResponse response = NServerResponse::nServerResponded;
+		if( m_serverAddresses.Count() == 0 )
+			response = NServerResponse::nServerFailedToRespond;
+
 		StopRefresh();
-		m_serverListResponse->RefreshComplete( NServerResponse::nServerFailedToRespond );
+		m_serverListResponse->RefreshComplete( response );
 		return;
 	}
 
@@ -185,7 +244,7 @@ void CMaster::RunFrame()
 
 		if( m_serverAddresses.Count() == 0 ) // Retry masterserver request
 		{
-			g_pServersInfo->RequestInternetServerList(m_szGameDir, NULL);
+			SendMasterQueries();
 			return;
 		}
 
@@ -201,8 +260,137 @@ void CMaster::StopRefresh()
 
 	m_iServersResponded = 0;
 	m_bRefreshing = false;
+	m_bLanRefresh = false;
 	m_serverAddresses.RemoveAll();
 	m_serversRequestTime.RemoveAll();
+}
+
+void CMaster::BeginListRefresh( IServerListResponse *response )
+{
+	IServerListResponse *pOldResponse = m_bRefreshing ? m_serverListResponse : NULL;
+
+	StopRefresh();
+
+	if( pOldResponse && pOldResponse != response )
+		pOldResponse->RefreshComplete( NServerResponse::nServerResponded );
+
+	m_bRefreshing = true;
+	m_serverListResponse = response;
+	m_flRetryRequestTime = m_flStartRequestTime = m_flMasterRequestTime = Plat_FloatTime();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Master servers come from cfg/MasterServers.vdf (same format as the
+//			original engine used) plus the built-in default. All of them are
+//			queried at once and the results are merged.
+//
+//	"MasterServers"
+//	{
+//		"hl2"
+//		{
+//			"0"	{ "addr"	"1.2.3.4:27011" }
+//		}
+//	}
+//-----------------------------------------------------------------------------
+void CMaster::AddMasterServer( const char *pszAddress )
+{
+	if ( !pszAddress || !pszAddress[0] || m_MasterServers.Count() >= MAX_MASTER_SERVERS )
+		return;
+
+	// old configs still point to Valve's masters: they list Steam servers that v34 can't join
+	if ( V_stristr( pszAddress, "steampowered.com" ) )
+	{
+		DevMsg( "Master server %s skipped (Steam master)\n", pszAddress );
+		return;
+	}
+
+	netadr_t adr;
+	if ( !adr.SetFromString( pszAddress, true ) || !adr.IsValid() )
+	{
+		DevMsg( "Master server %s can't be resolved\n", pszAddress );
+		return;
+	}
+
+	if ( m_MasterServers.Find( adr ) != m_MasterServers.InvalidIndex() )
+		return;
+
+	m_MasterServers.AddToTail( adr );
+}
+
+void CMaster::LoadMasterServers()
+{
+	m_MasterServers.RemoveAll();
+
+	KeyValues *kv = new KeyValues( "MasterServers" );
+	if ( kv->LoadFromFile( g_pFileSystem, MASTER_SERVERS_FILE, "MOD" ) ||
+		 kv->LoadFromFile( g_pFileSystem, MASTER_SERVERS_FILE, "GAME" ) )
+	{
+		for ( KeyValues *pGroup = kv->GetFirstTrueSubKey(); pGroup; pGroup = pGroup->GetNextTrueSubKey() )
+		{
+			for ( KeyValues *pEntry = pGroup->GetFirstTrueSubKey(); pEntry; pEntry = pEntry->GetNextTrueSubKey() )
+			{
+				AddMasterServer( pEntry->GetString( "addr", "" ) );
+			}
+		}
+	}
+	kv->deleteThis();
+
+	AddMasterServer( DEFAULT_MASTER_SERVER );
+}
+
+bool CMaster::IsMasterServer( const netadr_t &adr ) const
+{
+	FOR_EACH_VEC( m_MasterServers, i )
+	{
+		if ( m_MasterServers[i].CompareAdr( adr ) )
+			return true;
+	}
+	return false;
+}
+
+void CMaster::SendMasterQuery( const netadr_t &master, const char *pszStartAddress )
+{
+	ALIGN4 char buf[256] ALIGN4_POST;
+	bf_write msg( buf, sizeof(buf) );
+
+	msg.WriteByte( C2M_CLIENTQUERY );
+	msg.WriteByte( 255 ); // region always 255 (all)
+	msg.WriteString( pszStartAddress );
+	msg.WriteString( va( "\\gamedir\\%s", COM_GetModDirectory() ) );
+
+	sockaddr to;
+	master.ToSockadr( &to );
+
+	sendto( m_nSocket, (const char*)msg.GetData(), msg.GetNumBytesWritten(), 0, &to, sizeof(to) );
+}
+
+void CMaster::SendMasterQueries()
+{
+	FOR_EACH_VEC( m_MasterServers, i )
+	{
+		SendMasterQuery( m_MasterServers[i], "0.0.0.0:0" );
+	}
+}
+
+void CMaster::BroadcastLanQuery()
+{
+	static ALIGN4 char string[256] ALIGN4_POST;
+	bf_write msg( string, sizeof(string) );
+
+	msg.WriteLong( CONNECTIONLESS_HEADER );
+	msg.WriteByte( A2S_INFO );
+	msg.WriteString( A2S_KEY_STRING );
+
+	m_flLanBroadcastTime = Plat_FloatTime();
+
+	for ( int port = LAN_FIRST_PORT; port <= LAN_LAST_PORT; port++ )
+	{
+		netadr_t adr( 0xFFFFFFFF, port ); // 255.255.255.255
+		sockaddr to;
+		adr.ToSockadr( &to );
+
+		sendto( m_nSocket, (const char*)msg.GetData(), msg.GetNumBytesWritten(), 0, &to, sizeof(to) );
+	}
 }
 
 void CMaster::ReplyInfo( const netadr_t &adr )
@@ -356,7 +544,7 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 {
 	static ALIGN4 char string[2048] ALIGN4_POST;    // Buffer for sending heartbeat
 
-	uint ip; uint16 port;
+	uint ip = 0; uint16 port = 0;
 
 	bf_read msg = packet->message;
 	char c = msg.ReadChar();
@@ -366,29 +554,47 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 
 	switch( c )
 	{
-		case 0x41:
+		case 0x41: // S2C_CHALLENGE
 		{
 			int challenge = msg.ReadLong();
 
 			static ALIGN4 char string[256] ALIGN4_POST;
-			bf_write msg(string, sizeof(string));
+			bf_write reply(string, sizeof(string));
 
-			msg.WriteLong(CONNECTIONLESS_HEADER);
-			msg.WriteByte(A2S_PLAYER);
-			msg.WriteLong(challenge);
+			reply.WriteLong(CONNECTIONLESS_HEADER);
+
+			if ( m_PendingPlayerRequests.Find( packet->from ) != m_PendingPlayerRequests.InvalidIndex() )
+			{
+				// answer to our A2S_PLAYER
+				reply.WriteByte(A2S_PLAYER);
+				reply.WriteLong(challenge);
+			}
+			else if ( m_serversRequestTime.Find( packet->from.GetIPHostByteOrder() + packet->from.GetPort() ) != m_serversRequestTime.InvalidIndex() )
+			{
+				// server wants a challenge for A2S_INFO (anti-reflection patches)
+				reply.WriteByte(A2S_INFO);
+				reply.WriteString(A2S_KEY_STRING);
+				reply.WriteLong(challenge);
+			}
+			else
+			{
+				break; // we never asked this host for anything
+			}
 
 			sockaddr to;
 			packet->from.ToSockadr(&to);
 
-			sendto(m_nSocket, (const char*)msg.GetData(), msg.GetNumBytesWritten(), 0, &to, sizeof(to));
+			sendto(m_nSocket, (const char*)reply.GetData(), reply.GetNumBytesWritten(), 0, &to, sizeof(to));
 
 			break;
 		}
 
-		case 0x44:
+		case 0x44: // S2A_PLAYER
 		{
+			m_PendingPlayerRequests.Remove( packet->from );
+
 			int nPlayers = msg.ReadByte();
-			for (int i = 0; i < nPlayers; ++i)
+			for (int iPlayer = 0; iPlayer < nPlayers; ++iPlayer)
 			{
 				char str[256];
 
@@ -396,6 +602,9 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 				msg.ReadString(str, sizeof(str));
 				int score = msg.ReadLong();
 				float duration = msg.ReadFloat();
+
+				if ( msg.IsOverflowed() )
+					break; // truncated packet
 
 				if (str[0] != 0)
 				{
@@ -418,11 +627,16 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 
 				resp->PlayersRefreshComplete();
 			}
+			break; // was falling through into M2A_SERVER_BATCH
 		}
 
 		case M2A_SERVER_BATCH:
 		{
-			if( !m_bRefreshing )
+			if( !m_bRefreshing || m_bLanRefresh )
+				break;
+
+			// only trust server lists from our masters
+			if( !IsMasterServer( packet->from ) )
 				break;
 
 			msg.ReadByte();
@@ -454,21 +668,9 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 
 			if (ip != 0 && port != 0)
 			{
-				ALIGN4 char buf[256] ALIGN4_POST;
-				bf_write msg(buf, sizeof(buf));
-
+				// ask the same master for the next batch
 				netadr_t startadr(BigLong(ip), BigShort(port));
-
-				msg.WriteByte(C2M_CLIENTQUERY);
-				msg.WriteByte(255); // region always 255 (all)
-				msg.WriteString(startadr.ToString());
-				msg.WriteString(va("\\gamedir\\%s", COM_GetModDirectory()));
-
-				netadr_t adr("78.154.103.37:10232");
-				sockaddr to;
-				adr.ToSockadr(&to);
-
-				sendto(m_nSocket, (const char*)msg.GetData(), msg.GetNumBytesWritten(), 0, &to, sizeof(to));
+				SendMasterQuery( packet->from, startadr.ToString() );
 			}
 
 			break;
@@ -484,9 +686,20 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 
 			unsigned short rindex = m_serversRequestTime.Find(packet->from.GetIPHostByteOrder() + packet->from.GetPort());
 
-			if (rindex == m_serversRequestTime.InvalidIndex()) break;
-
-			double requestTime = m_serversRequestTime[rindex];
+			double requestTime;
+			if (rindex != m_serversRequestTime.InvalidIndex())
+			{
+				requestTime = m_serversRequestTime[rindex];
+			}
+			else if (m_bRefreshing && m_bLanRefresh)
+			{
+				// answer to our LAN broadcast
+				requestTime = m_flLanBroadcastTime;
+			}
+			else
+			{
+				break;
+			}
 
 			s.m_nPing = (Plat_FloatTime() - requestTime) * 1000.0;
 			s.m_NetAdr = packet->from;
@@ -500,6 +713,16 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 
 			if (!m_bRefreshing)
 				break;
+
+			if (m_bLanRefresh)
+			{
+				// only servers of our game
+				if (Q_stricmp(s.m_szGameDir, m_szGameDir))
+					break;
+
+				if (m_serverAddresses.Find(packet->from) == m_serverAddresses.InvalidIndex())
+					m_serverAddresses.Insert(packet->from, false);
+			}
 
 			unsigned short index = m_serverAddresses.Find(packet->from);
 
@@ -586,6 +809,12 @@ void CMaster::PlayerDetails(uint32 unIP, uint16 usPort, IServerPlayersResponse* 
 		m_ServerPlayers.AddToTail(pRequestServersResponse);
 	}
 
+	if (m_PendingPlayerRequests.Count() > 256)
+		m_PendingPlayerRequests.RemoveAll(); // servers that never answered
+
+	if (m_PendingPlayerRequests.Find(adr) == m_PendingPlayerRequests.InvalidIndex())
+		m_PendingPlayerRequests.Insert(adr, true);
+
 	static ALIGN4 char string[256] ALIGN4_POST;
 	bf_write msg(string, sizeof(string));
 
@@ -627,6 +856,10 @@ void CMaster::Init( void )
 
 	unsigned int opt = 1; // make it non-blocking
 	ioctlsocket(m_nSocket, FIONBIO, (unsigned long*)&opt);
+
+	// needed for the LAN tab
+	int bBroadcast = 1;
+	setsockopt(m_nSocket, SOL_SOCKET, SO_BROADCAST, (char *)&bBroadcast, sizeof(bBroadcast));
 }
 
 //-----------------------------------------------------------------------------
@@ -640,32 +873,26 @@ void CMaster::Shutdown(void)
 // ServersInfo
 void CMaster::RequestInternetServerList(const char *gamedir, IServerListResponse *response)
 {
-	strncpy( m_szGameDir, gamedir, sizeof(m_szGameDir) );
+	Q_strncpy( m_szGameDir, gamedir, sizeof(m_szGameDir) );
 
 	if( response )
 	{
-		StopRefresh();
-		m_bRefreshing = true;
-		m_serverListResponse = response;
-		m_flRetryRequestTime = m_flStartRequestTime = m_flMasterRequestTime = Plat_FloatTime();
+		BeginListRefresh( response );
+		LoadMasterServers(); // pick up cfg/MasterServers.vdf changes on every refresh
 	}
 
-	ALIGN4 char buf[256] ALIGN4_POST;
-	bf_write msg(buf, sizeof(buf));
-
-	msg.WriteByte( C2M_CLIENTQUERY );
-	msg.WriteByte( 255 ); // region always 255 (all)
-	msg.WriteString("0.0.0.0:0");
-	msg.WriteString(va("\\gamedir\\%s", COM_GetModDirectory()));
-
-	netadr_t adr("78.154.103.37:10232");
-	sockaddr to;
-	adr.ToSockadr(&to);
-
-	sendto(m_nSocket, (const char*)msg.GetData(), msg.GetNumBytesWritten(), 0, &to, sizeof(to));
+	SendMasterQueries();
 }
 
 void CMaster::RequestLANServerList(const char* gamedir, IServerListResponse* response)
 {
+	if ( !response )
+		return;
 
+	Q_strncpy( m_szGameDir, gamedir, sizeof(m_szGameDir) );
+
+	BeginListRefresh( response );
+	m_bLanRefresh = true;
+
+	BroadcastLanQuery();
 }

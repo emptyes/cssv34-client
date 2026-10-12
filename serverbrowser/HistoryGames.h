@@ -32,6 +32,11 @@ public:
 	// called when the current refresh list is complete
 	virtual void RefreshComplete( NServerResponse response );
 
+	// saved list from ServerBrowser.vdf
+	virtual KeyValues *GetAddressList();
+	virtual void OnAddressListEntryAdded( KeyValues *pEntry, KeyValues *pRow );
+	virtual void OnAddressListServerResponded( newgameserver_t &server );
+
 	void SetRefreshOnReload() { m_bRefreshOnListReload = true; }
 
 private:

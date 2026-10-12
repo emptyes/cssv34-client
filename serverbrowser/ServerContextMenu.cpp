@@ -52,7 +52,7 @@ void CServerContextMenu::ShowMenu(
 	if (showAddToFavorites)
 	{
 		AddMenuItem("AddToFavorites", "#ServerBrowser_AddServerToFavorites", new KeyValues("AddToFavorites", "serverID", serverID), target);
-		AddMenuItem("AddToBlacklist", "#ServerBrowser_AddServerToBlacklist", new KeyValues("AddToBlacklist", "serverID", serverID), target);
+		// no blacklist tab in v34
 	}
 
 	int x, y, gx, gy;

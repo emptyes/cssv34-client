@@ -32,6 +32,7 @@
 #endif
 #include "tier0/vprof.h"
 #include <rmlui_wrapper.h>
+#include "tier0/icommandline.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -57,6 +58,11 @@ void SCR_Init (void)
 	rmluimodule = nullptr;
 	rmlui = nullptr;
 	scr_initialized = true;
+
+	// Nothing uses RmlUi yet (no contexts are created), while loading it costs startup time
+	// (Lua, fonts) and an input pass every frame. The UI stays VGUI, as in v34.
+	if ( !CommandLine()->FindParm( "-rmlui" ) )
+		return;
 
 	rmluimodule = Sys_LoadModule("rmlui_utils" DLL_EXT_STRING);
 	if (!rmluimodule)

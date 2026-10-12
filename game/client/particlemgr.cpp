@@ -332,7 +332,9 @@ int CParticleEffectBinding::DrawModel( int flags )
 	// cl_particle_fallback_draw: this effect is drawn by CParticleMgr::DrawFallbackEffects,
 	// skip the leaf system draw (it always passes STUDIO_TRANSPARENCY) so it isn't drawn twice.
 	// The 3D skybox keeps the normal path.
-	if ( ( flags & STUDIO_TRANSPARENCY ) && cl_particle_fallback_draw.GetBool() && !s_bParticleFallbackSkyboxPass )
+	// Effects drawn after the translucents (smoke grenades) always keep the leaf system path.
+	if ( ( flags & STUDIO_TRANSPARENCY ) && cl_particle_fallback_draw.GetBool() && !s_bParticleFallbackSkyboxPass &&
+		!GetFlag( FLAGS_DRAW_AFTER_TRANSLUCENTS ) )
 	{
 		return 0;
 	}
@@ -1527,6 +1529,10 @@ void CParticleMgr::DrawFallbackEffects( bool bInSkybox )
 		if ( pEffect->GetRemoveFlag() || !pEffect->GetFlag( CParticleEffectBinding::FLAGS_DRAW_THRU_LEAF_SYSTEM ) )
 			continue;
 
+		// drawn after the translucents through the leaf system (smoke grenades)
+		if ( pEffect->GetDrawAfterTranslucents() )
+			continue;
+
 		if ( !pEffect->m_nActiveParticles )
 			continue;
 
@@ -1542,6 +1548,25 @@ void CParticleMgr::DrawFallbackEffects( bool bInSkybox )
 
 		pEffect->DrawModel( STUDIO_RENDER );
 	}
+}
+
+
+int CParticleMgr::GetDrawAfterTranslucentsEffects( CParticleEffectBinding **ppEffects, int nMaxEffects )
+{
+	int nCount = 0;
+	FOR_EACH_LL( m_Effects, i )
+	{
+		if ( nCount >= nMaxEffects )
+			break;
+
+		CParticleEffectBinding *pEffect = m_Effects[i];
+		if ( pEffect->GetRemoveFlag() || !pEffect->GetDrawAfterTranslucents() || !pEffect->m_nActiveParticles )
+			continue;
+
+		ppEffects[nCount++] = pEffect;
+	}
+
+	return nCount;
 }
 
 

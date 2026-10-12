@@ -66,6 +66,7 @@ projects={
 		'kv3lib',
 		'launcher',
 		'launcher_main',
+		'css_launcher',
 		'materialsystem',
 #		'materialsystem/shaderapiempty',
 		'materialsystem/shaderapidx9',

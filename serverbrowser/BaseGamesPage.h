@@ -81,7 +81,7 @@ struct gametypes_t
 //-----------------------------------------------------------------------------
 // Purpose: Base property page for all the games lists (internet/favorites/lan/etc.)
 //-----------------------------------------------------------------------------
-class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerListResponse //, public ISteamMatchmakingPingResponse
+class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerListResponse, public IServerPingResponse
 {
 	DECLARE_CLASS_SIMPLE( CBaseGamesPage, vgui::PropertyPage );
 
@@ -160,6 +160,9 @@ public:
 		StopRefresh();
 	}
 
+	// finds a server shown on this page by its address, NULL if not listed
+	newgameserver_t *FindServerByAddress( const netadr_t &adr );
+
 protected:
 	virtual void OnCommand(const char *command);
 	virtual void OnKeyCodePressed(vgui::KeyCode code);
@@ -171,8 +174,30 @@ protected:
 	void UpdateStatus();
 
 	// ISteamMatchmakingServerListResponse callbacks
+	// IServerListResponse + IServerPingResponse (same signature)
 	virtual void ServerResponded( newgameserver_t &server );
 	virtual void RefreshComplete( NServerResponse response );
+
+	// Pages that show a saved list of addresses (favorites, history) return it here.
+	// Those pages ping every saved server directly instead of asking the master server.
+	virtual KeyValues *GetAddressList() { return NULL; }
+	// called for each saved entry when its row is created
+	virtual void OnAddressListEntryAdded( KeyValues *pEntry, KeyValues *pRow ) {}
+	// called when a saved server answered
+	virtual void OnAddressListServerResponded( newgameserver_t &server ) {}
+
+	void StartAddressListRefresh();
+	void FinishAddressListRefresh();
+	void PingAddressListServers( bool bOnlyUnanswered );
+	MESSAGE_FUNC_INT( OnAddressListRetry, "AddressListRetry", serial );
+	MESSAGE_FUNC_INT( OnAddressListTimeout, "AddressListTimeout", serial );
+
+	// row helpers
+	void FillServerKeyValues( KeyValues *kv, newgameserver_t &server );
+	int AddServerRow( newgameserver_t &server, KeyValues *pExtra = NULL );
+	void UpdateServerRow( int iServerIndex, newgameserver_t &server );
+	void RemoveServerByAddress( const netadr_t &adr );
+	void GetSelectedAddresses( CUtlVector<netadr_t> &addresses );
 
 	// ISteamMatchmakingPingResponse callbacks
 	//virtual void ServerResponded( gameserveritem_t &server );
@@ -245,6 +270,10 @@ protected:
 
 	EPageType m_eMatchMakingType;
 	HServerListRequest m_hRequest;
+
+	bool m_bListRefreshing;			// waiting for the master/LAN list (internet, LAN)
+	bool m_bAddressListRefreshing;	// pinging saved servers (favorites, history)
+	int m_nAddressListSerial;		// invalidates delayed retry/timeout messages of an older refresh
 
 	int	GetSelectedServerID( KeyValues **pKV = NULL );
 

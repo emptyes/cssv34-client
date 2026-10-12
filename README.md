@@ -41,6 +41,7 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
 - You need to download content. Download it from: [here](https://drive.google.com/file/d/1wzovBhjmJ_mDTpS3Lq89x57zhHTykgcN/view)
 - Unpack this content into the output folder that you configurated.
 - Run hl2_launcher.exe with `-game cstrike` (you can create .bat file for it)
+- Or run css_launcher.exe: it starts the game with launch options (display mode, resolution, RmlUi, etc.) saved in css_launcher.ini
 
 ---
 
