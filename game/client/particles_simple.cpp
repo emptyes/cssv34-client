@@ -6,6 +6,9 @@
 //===========================================================================//
 #include "cbase.h"
 #include "particles_simple.h"
+#include "particles_ez.h"
+#include "clientleafsystem.h"
+#include "materialsystem/imaterial.h"
 #include "env_wind_shared.h"
 #include "KeyValues.h"
 #include "toolframework_client.h"
@@ -530,4 +533,116 @@ Vector CFireParticle::UpdateColor( const SimpleParticle *pParticle )
 	}
 
 	return CSimpleEmitter::UpdateColor( pParticle );
+}
+
+class CIssue35ProbeEmitter : public CSimpleEmitter
+{
+public:
+	CIssue35ProbeEmitter( int mode ) : CSimpleEmitter( "issue35_probe" ),
+		m_nMode( mode ), m_nRenderCalls( 0 ), m_flNextLog( 0 ), m_bRelinked( false )
+	{
+		SetDynamicallyAllocated( true );
+	}
+
+	virtual void Update( float dt )
+	{
+		CSimpleEmitter::Update( dt );
+		CParticleEffectBinding &binding = GetBinding();
+		if ( ( m_nMode == 1 && !m_bRelinked ) || m_nMode == 2 )
+		{
+			ClientLeafSystem()->RenderableChanged( binding.RenderHandle() );
+			m_bRelinked = true;
+		}
+		if ( gpGlobals->curtime < m_flNextLog )
+			return;
+		m_flNextLog = gpGlobals->curtime + 1.0f;
+		int leaves[128];
+		int count = ClientLeafSystem()->GetRenderableLeaves( binding.RenderHandle(), leaves );
+		Vector mins, maxs;
+		binding.GetWorldspaceBounds( &mins, &maxs );
+		Msg( "[issue35] mode=%d active=%d handle=%u leaves=%d pvs=%d prev_drawn=%d render_calls=%d bbox=(%.1f %.1f %.1f)-(%.1f %.1f %.1f)\n",
+			m_nMode, binding.GetNumActiveParticles(), (unsigned int)binding.RenderHandle(), count,
+			ClientLeafSystem()->IsRenderableInPVS( &binding ) ? 1 : 0,
+			binding.WasDrawnPrevFrame() ? 1 : 0, m_nRenderCalls,
+			mins.x, mins.y, mins.z, maxs.x, maxs.y, maxs.z );
+	}
+
+	virtual void RenderParticles( CParticleRenderIterator *iterator )
+	{
+		if ( m_nRenderCalls == 0 )
+		{
+			Vector camera;
+			TransformParticle( ParticleMgr()->GetModelView(), GetSortOrigin(), camera );
+			Msg( "[issue35] first_render mode=%d camera=(%.1f %.1f %.1f) near_fade=%.3f\n",
+				m_nMode, camera.x, camera.y, camera.z,
+				GetAlphaDistanceFade( camera, 16.0f, 64.0f ) );
+		}
+		++m_nRenderCalls;
+		CSimpleEmitter::RenderParticles( iterator );
+	}
+private:
+	int m_nMode;
+	int m_nRenderCalls;
+	float m_flNextLog;
+	bool m_bRelinked;
+};
+
+CON_COMMAND_F( cl_particle35_probe, "Issue 35: green=leaf emitter, cyan=singleton, 15 seconds. Modes: 0 normal, 1 initial relink, 2 continuous relink, 3 fixed 32-unit bbox.", FCVAR_CHEAT )
+{
+	C_BasePlayer *player = C_BasePlayer::GetLocalPlayer();
+	if ( !engine->IsInGame() || !player )
+	{
+		Msg( "[issue35] Start a local map and join a team first.\n" );
+		return;
+	}
+	int mode = args.ArgC() > 1 ? atoi( args[1] ) : 0;
+	if ( mode < 0 || mode > 3 )
+	{
+		Msg( "[issue35] Valid modes: 0, 1, 2, 3.\n" );
+		return;
+	}
+	Vector forward, right;
+	AngleVectors( player->EyeAngles(), &forward, &right, NULL );
+	Vector center = player->EyePosition() + forward * 160.0f;
+	Vector emitterPos = center - right * 24.0f;
+	Vector singletonPos = center + right * 24.0f;
+
+	CSmartPtr<CSimpleEmitter> emitter = new CIssue35ProbeEmitter( mode );
+	emitter->SetSortOrigin( emitterPos );
+	PMaterialHandle material = emitter->GetPMaterial( "effects/yellowflare" );
+	IMaterial *resolved = ParticleMgr()->PMaterialToIMaterial( material );
+	if ( !resolved || resolved->IsErrorMaterial() )
+	{
+		Msg( "[issue35] Missing/error material effects/yellowflare. Test invalid.\n" );
+		return;
+	}
+	SimpleParticle *particle = emitter->AddSimpleParticle( material, emitterPos, 15.0f, 12 );
+	if ( !particle )
+	{
+		Msg( "[issue35] Failed to allocate emitter particle.\n" );
+		return;
+	}
+	particle->m_uchColor[0] = 32;
+	particle->m_uchColor[1] = 255;
+	particle->m_uchColor[2] = 32;
+	particle->m_uchStartAlpha = particle->m_uchEndAlpha = 255;
+	if ( mode == 3 )
+		emitter->GetBinding().SetBBox( emitterPos - Vector( 32, 32, 32 ), emitterPos + Vector( 32, 32, 32 ), true );
+
+	SimpleParticle singleton;
+	singleton.m_Pos = singletonPos;
+	singleton.m_vecVelocity.Init();
+	singleton.m_flRoll = singleton.m_flRollDelta = singleton.m_flLifetime = 0.0f;
+	singleton.m_flDieTime = 15.0f;
+	singleton.m_uchColor[0] = 32;
+	singleton.m_uchColor[1] = 255;
+	singleton.m_uchColor[2] = 255;
+	singleton.m_uchStartAlpha = singleton.m_uchEndAlpha = 255;
+	singleton.m_uchStartSize = singleton.m_uchEndSize = 12;
+	singleton.m_iFlags = 0;
+	AddSimpleParticle( &singleton, material );
+	ConVar *fallback = cvar->FindVar( "cl_particle_fallback_draw" );
+	Msg( "[issue35] START mode=%d fallback=%d material=%s emitter=(%.1f %.1f %.1f) singleton=(%.1f %.1f %.1f). GREEN LEFT=emitter, CYAN RIGHT=singleton. Stay still for 5 seconds.\n",
+		mode, fallback ? fallback->GetInt() : -1, resolved->GetName(),
+		emitterPos.x, emitterPos.y, emitterPos.z, singletonPos.x, singletonPos.y, singletonPos.z );
 }
