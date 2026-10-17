@@ -15,6 +15,7 @@
 #include "engine/ivmodelinfo.h"
 #include "particles_ez.h"
 #include "c_impact_effects.h"
+#include "materialsystem/imaterial.h"
 #include "engine/IStaticPropMgr.h"
 #include "tier0/vprof.h"
 #include "c_te_effect_dispatch.h"
@@ -47,6 +48,8 @@ PMaterialHandle g_Mat_DustPuff[2] = { NULL, NULL };
 PMaterialHandle g_Mat_BloodPuff[2] = { NULL, NULL };
 PMaterialHandle g_Mat_SMG_Muzzleflash[4] = { NULL, NULL, NULL, NULL };
 PMaterialHandle g_Mat_Combine_Muzzleflash[3] = { NULL, NULL, NULL };
+
+static ConVar cl_particle35_dust_mode( "cl_particle35_dust_mode", "0", FCVAR_CHEAT, "Issue35 dust: 0=current singleton, 1=original emitter, 2=original emitter offset 2 units.", true, 0, true, 2 );
 
 static ConVar fx_drawimpactdebris( "fx_drawimpactdebris", "1", FCVAR_DEVELOPMENTONLY, "Draw impact debris effects." );
 static ConVar fx_drawimpactdust( "fx_drawimpactdust", "1", FCVAR_DEVELOPMENTONLY, "Draw impact dust effects." );
@@ -1073,8 +1076,169 @@ void FX_DustImpact( const Vector &origin, trace_t *tr, int iScale )
 #endif // _XBOX
 }
 
+static void FX_DustImpactLegacy35( const Vector &origin, trace_t *tr, float flScale )
+{
+
+	VPROF_BUDGET( "FX_DustImpact", VPROF_BUDGETGROUP_PARTICLE_RENDERING );
+	Vector	offset;
+	float	spread = 0.2f;
+	
+	CSmartPtr<CDustParticle> pSimple = CDustParticle::Create( "issue35_legacy_dust" );
+	pSimple->SetSortOrigin( origin );
+
+	float fNumParticles = 4.0f * g_pParticleSystemMgr->ParticleThrottleScaling();
+	int nParticles1 = (int)( 0.50f + fNumParticles );
+	int nParticles2 = (int)( 0.83f + fNumParticles );		
+	int nParticles3 = (int)( 0.17f + fNumParticles );
+
+	SimpleParticle	*pParticle;
+
+	Vector	color;
+	float	colorRamp;
+
+	GetColorForSurface( tr, &color );
+
+	const static int nParticleIdArray[4] = {3,1,2,0};
+
+	int i;
+	for ( i = 0; i < nParticles1; i++ )
+	{
+		int nId = nParticleIdArray[i];
+
+		pParticle = (SimpleParticle *) pSimple->AddParticle( sizeof( SimpleParticle ), g_Mat_DustPuff[0], origin );
+
+		if ( pParticle != NULL )
+		{
+			pParticle->m_flLifetime = 0.0f;
+			pParticle->m_flDieTime	= random->RandomFloat( 0.5f, 1.0f );
+
+			pParticle->m_vecVelocity.Random( -spread, spread );
+			pParticle->m_vecVelocity += ( tr->plane.normal * random->RandomFloat( 1.0f, 6.0f ) );
+			
+			VectorNormalize( pParticle->m_vecVelocity );
+
+			float	fForce = random->RandomFloat( 250, 500 ) * nId;
+
+			pParticle->m_vecVelocity *= fForce * flScale;
+			
+			colorRamp = random->RandomFloat( 0.75f, 1.25f );
+
+			pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[1]	= MIN( 1.0f, color[1] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[2]	= MIN( 1.0f, color[2] * colorRamp ) * 255.0f;
+
+			pParticle->m_uchStartSize	= ( unsigned char )( flScale * random->RandomInt( 3, 4 ) * (nId+1) );
+
+			pParticle->m_uchEndSize		= ( unsigned char )( flScale * pParticle->m_uchStartSize * 4 );
+			
+			pParticle->m_uchStartAlpha	= random->RandomInt( 32, 255 );
+			pParticle->m_uchEndAlpha	= 0;
+			
+			pParticle->m_flRoll			= random->RandomInt( 0, 360 );
+			pParticle->m_flRollDelta	= random->RandomFloat( -8.0f, 8.0f );
+		}
+	}			
+
+	for ( i = 0; i < nParticles2; i++ )
+	{
+		int nId = nParticleIdArray[i];
+
+		pParticle = (SimpleParticle *) pSimple->AddParticle( sizeof( SimpleParticle ), g_Mat_BloodPuff[0], origin );
+
+		if ( pParticle != NULL )
+		{
+			pParticle->m_flLifetime = 0.0f;
+			pParticle->m_flDieTime	= random->RandomFloat( 0.25f, 0.75f );
+
+			pParticle->m_vecVelocity.Random( -spread, spread );
+			pParticle->m_vecVelocity += ( tr->plane.normal * random->RandomFloat( 1.0f, 6.0f ) );
+			
+			VectorNormalize( pParticle->m_vecVelocity );
+
+			float	fForce = random->RandomFloat( 250, 500 ) * nId;
+
+			pParticle->m_vecVelocity *= fForce;
+			
+			colorRamp = random->RandomFloat( 0.75f, 1.25f );
+
+			pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[1]	= MIN( 1.0f, color[1] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[2]	= MIN( 1.0f, color[2] * colorRamp ) * 255.0f;
+			
+			pParticle->m_uchStartSize	= random->RandomInt( 2, 4 ) * (nId+1);
+			pParticle->m_uchEndSize		= pParticle->m_uchStartSize * 2;
+			
+			pParticle->m_uchStartAlpha	= 255;
+			pParticle->m_uchEndAlpha	= 0;
+			
+			pParticle->m_flRoll			= random->RandomInt( 0, 360 );
+			pParticle->m_flRollDelta	= random->RandomFloat( -2.0f, 2.0f );
+		}
+	}
+
+	for ( i = 0; i < nParticles3; i++ )
+	{
+
+		pParticle = (SimpleParticle *) pSimple->AddParticle( sizeof( SimpleParticle ), g_Mat_DustPuff[0], origin );
+
+		if ( pParticle != NULL )
+		{
+			offset = origin;
+			offset[0] += random->RandomFloat( -8.0f, 8.0f );
+			offset[1] += random->RandomFloat( -8.0f, 8.0f );
+
+			pParticle->m_flLifetime = 0.0f;
+			pParticle->m_flDieTime	= random->RandomFloat( 0.5f, 1.0f );
+
+			spread = 1.0f;
+
+			pParticle->m_vecVelocity.Random( -spread, spread );
+			pParticle->m_vecVelocity += tr->plane.normal;
+			
+			VectorNormalize( pParticle->m_vecVelocity );
+
+			float	fForce = random->RandomFloat( 0, 50 );
+
+			pParticle->m_vecVelocity *= fForce;
+			
+			colorRamp = random->RandomFloat( 0.75f, 1.25f );
+
+			pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[1]	= MIN( 1.0f, color[1] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[2]	= MIN( 1.0f, color[2] * colorRamp ) * 255.0f;
+			
+			pParticle->m_uchStartSize	= random->RandomInt( 1, 4 );
+			pParticle->m_uchEndSize		= pParticle->m_uchStartSize * 4;
+			
+			pParticle->m_uchStartAlpha	= random->RandomInt( 32, 64 );
+			pParticle->m_uchEndAlpha	= 0;
+			
+			pParticle->m_flRoll			= random->RandomInt( 0, 360 );
+			pParticle->m_flRollDelta	= random->RandomFloat( -16.0f, 16.0f );
+		}
+	}			
+
+	IMaterial *dust = ParticleMgr()->PMaterialToIMaterial( g_Mat_DustPuff[0] );
+	IMaterial *blood = ParticleMgr()->PMaterialToIMaterial( g_Mat_BloodPuff[0] );
+	Msg( "[issue35-dust] mode=%d active=%d scale=%.3f throttle=%.3f color=(%.3f %.3f %.3f) dust_error=%d blood_error=%d origin=(%.1f %.1f %.1f)\n",
+		cl_particle35_dust_mode.GetInt(), pSimple->GetBinding().GetNumActiveParticles(), flScale,
+		g_pParticleSystemMgr->ParticleThrottleScaling(), color.x, color.y, color.z,
+		( !dust || dust->IsErrorMaterial() ) ? 1 : 0, ( !blood || blood->IsErrorMaterial() ) ? 1 : 0,
+		origin.x, origin.y, origin.z );
+}
+
 void FX_DustImpact( const Vector &origin, trace_t *tr, float flScale )
 {
+	int mode = cl_particle35_dust_mode.GetInt();
+	if ( mode != 0 )
+	{
+		Vector testOrigin = origin;
+		if ( mode == 2 )
+			testOrigin += tr->plane.normal * 2.0f;
+		FX_DustImpactLegacy35( testOrigin, tr, flScale );
+		return;
+	}
+
 	//
 	// PC version
 	//
