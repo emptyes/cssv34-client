@@ -459,7 +459,7 @@ FSReturnCode_t LoadGameInfoFile(
 		return SetupFileSystemError( true, FS_MISSING_GAMEINFO_FILE, "%s is missing.", gameinfoFilename );
 	}
 
-	for (KeyValues* first = pFileSystemInfo->GetFirstSubKey(); first; first = first->GetNextKey())
+	for (KeyValues* first = pMainFile->GetFirstSubKey(); first; first = first->GetNextKey())
 	{
 		Msg("%s\n", first->GetName());
 	}
@@ -471,6 +471,11 @@ FSReturnCode_t LoadGameInfoFile(
 		return SetupFileSystemError( true, FS_INVALID_GAMEINFO_FILE, "%s is not a valid format.", gameinfoFilename );
 	}
 
+	for (KeyValues* first = pFileSystemInfo->GetFirstSubKey(); first; first = first->GetNextKey())
+	{
+		Msg("%s\n", first->GetName());
+	}
+
 	// Now read in all the search paths.
 	pSearchPaths = pFileSystemInfo->FindKey( "SearchPaths" );
 
@@ -478,6 +483,11 @@ FSReturnCode_t LoadGameInfoFile(
 	{
 		pMainFile->deleteThis();
 		return SetupFileSystemError( true, FS_INVALID_GAMEINFO_FILE, "%s is not a valid format.", gameinfoFilename );
+	}
+
+	for (KeyValues* first = pSearchPaths->GetFirstSubKey(); first; first = first->GetNextKey())
+	{
+		Msg("%s\n", first->GetName());
 	}
 	return FS_OK;
 }
