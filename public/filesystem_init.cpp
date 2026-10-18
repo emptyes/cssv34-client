@@ -459,11 +459,6 @@ FSReturnCode_t LoadGameInfoFile(
 		return SetupFileSystemError( true, FS_MISSING_GAMEINFO_FILE, "%s is missing.", gameinfoFilename );
 	}
 
-	for (KeyValues* first = pFileSystemInfo->GetFirstSubKey(); first; first = first->GetNextKey())
-	{
-		Msg("%s\n", first->GetName());
-	}
-
 	pFileSystemInfo = pMainFile->FindKey( "FileSystem" );
 	if ( !pFileSystemInfo )
 	{
@@ -473,7 +468,6 @@ FSReturnCode_t LoadGameInfoFile(
 
 	// Now read in all the search paths.
 	pSearchPaths = pFileSystemInfo->FindKey( "SearchPaths" );
-
 	if ( !pSearchPaths )
 	{
 		pMainFile->deleteThis();
