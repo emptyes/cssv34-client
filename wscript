@@ -376,6 +376,8 @@ def check_deps(conf):
 		conf.check(lib='jpeg', uselib_store='JPEG', define_name='HAVE_JPEG')
 		conf.check(lib='png', uselib_store='PNG', define_name='HAVE_PNG')
 		conf.check(lib='curl', uselib_store='CURL', define_name='HAVE_CURL')
+		conf.check(lib='crypto', uselib_store='CRYPTO')
+		conf.check(lib='ssl', uselib_store='SSL')
 		conf.check(lib='z', uselib_store='ZLIB', define_name='HAVE_ZLIB')
 		if conf.env.DEST_CPU != 'aarch64':
 			conf.check(lib='unwind', uselib_store='UNWIND')
