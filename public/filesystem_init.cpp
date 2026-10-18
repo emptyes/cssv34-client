@@ -431,6 +431,107 @@ FSReturnCode_t SetupFileSystemError( bool bRunVConfig, FSReturnCode_t retVal, co
 	return retVal;
 }
 
+static void KvIndent(int depth)
+{
+	for (int i = 0; i < depth * 2; ++i)
+		Msg(" ");
+}
+
+static void KvPrintEscaped(const char* s)
+{
+	if (!s) { Msg("(null)"); return; }
+	for (const unsigned char* p = (const unsigned char*)s; *p; ++p)
+	{
+		switch (*p)
+		{
+		case '\n': Msg("\\n");  break;
+		case '\r': Msg("\\r");  break;
+		case '\t': Msg("\\t");  break;
+		case '\\': Msg("\\\\"); break;
+		case '"':  Msg("\\\""); break;
+		default:
+			if (*p < 0x20)
+				Msg("\\x%02X", *p);
+			else
+				Msg("%c", *p);
+		}
+	}
+}
+
+static void KvPrintValue(KeyValues* kv)
+{
+	switch (kv->GetDataType())
+	{
+	case KeyValues::TYPE_NONE:
+		Msg("(none)");
+		break;
+
+	case KeyValues::TYPE_STRING:
+		Msg("\"");
+		KvPrintEscaped(kv->GetString());
+		Msg("\"");
+		break;
+
+	case KeyValues::TYPE_INT:
+		Msg("%d", kv->GetInt());
+		break;
+
+	case KeyValues::TYPE_UINT64:
+		Msg("0x%016llX", (unsigned long long)kv->GetUint64());
+		break;
+
+	case KeyValues::TYPE_FLOAT:
+		Msg("%g", kv->GetFloat());
+		break;
+
+	case KeyValues::TYPE_PTR:
+		Msg("%p", kv->GetPtr());
+		break;
+
+	case KeyValues::TYPE_WSTRING:
+		Msg("(wstring)");
+		break;
+
+	default:
+		Msg("(unknown type=%d)", kv->GetDataType());
+		break;
+	}
+}
+
+static void KvDumpRecursive(KeyValues* kv, int depth)
+{
+	for (; kv; kv = kv->GetNextKey())
+	{
+		KvIndent(depth);
+		Msg("[%d] \"", depth);
+		KvPrintEscaped(kv->GetName());
+		Msg("\" (type=%d ptr=%p sub=%p peer=%p) = ",
+			kv->GetDataType(),
+			(void*)kv,
+			(void*)kv->GetFirstSubKey(),
+			(void*)kv->GetNextKey());
+		KvPrintValue(kv);
+		Msg("\n");
+
+		if (kv->GetFirstSubKey())
+			KvDumpRecursive(kv->GetFirstSubKey(), depth + 1);
+	}
+}
+
+static void KvDumpAll(KeyValues* kv, const char* label = "")
+{
+	if (!kv)
+	{
+		Msg("===== KvDumpAll(%s): NULL =====\n", label ? label : "");
+		return;
+	}
+
+	Msg("===== KvDumpAll(%s) root='%s' ptr=%p =====\n",
+		label ? label : "", kv->GetName(), (void*)kv);
+	KvDumpRecursive(kv, 0);
+	Msg("===== end %s =====\n", label ? label : "");
+}
+
 FSReturnCode_t LoadGameInfoFile( 
 	const char *pDirectoryName, 
 	KeyValues *&pMainFile, 
@@ -458,22 +559,14 @@ FSReturnCode_t LoadGameInfoFile(
 	{
 		return SetupFileSystemError( true, FS_MISSING_GAMEINFO_FILE, "%s is missing.", gameinfoFilename );
 	}
-
-	for (KeyValues* first = pMainFile->GetFirstSubKey(); first; first = first->GetNextKey())
-	{
-		Msg("%s\n", first->GetName());
-	}
+	KvDumpAll(pMainFile, "GameInfo");
 
 	pFileSystemInfo = pMainFile->FindKey( "FileSystem" );
 	if ( !pFileSystemInfo )
 	{
+		Msg("failed to find key 'FileSystem'\n");
 		pMainFile->deleteThis();
 		return SetupFileSystemError( true, FS_INVALID_GAMEINFO_FILE, "%s is not a valid format.", gameinfoFilename );
-	}
-
-	for (KeyValues* first = pFileSystemInfo->GetFirstSubKey(); first; first = first->GetNextKey())
-	{
-		Msg("%s\n", first->GetName());
 	}
 
 	// Now read in all the search paths.
@@ -481,13 +574,9 @@ FSReturnCode_t LoadGameInfoFile(
 
 	if ( !pSearchPaths )
 	{
+		Msg("failed to find key 'SearchPaths'\n");
 		pMainFile->deleteThis();
 		return SetupFileSystemError( true, FS_INVALID_GAMEINFO_FILE, "%s is not a valid format.", gameinfoFilename );
-	}
-
-	for (KeyValues* first = pSearchPaths->GetFirstSubKey(); first; first = first->GetNextKey())
-	{
-		Msg("%s\n", first->GetName());
 	}
 	return FS_OK;
 }
