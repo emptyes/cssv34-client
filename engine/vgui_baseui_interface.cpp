@@ -81,10 +81,6 @@
 #include <vgui/ISurface.h>
 #include <vgui_controls/EditablePanel.h>
 
-//#include "RmlUi/Core.h"
-//#include "RmlUi/Debugger.h"
-//#include "RmlUi_Backend.h"
-
 #include <vgui_controls/MenuButton.h>
 #include <vgui_controls/Menu.h>
 #include <vgui_controls/PHandle.h>
@@ -94,7 +90,6 @@
 #include "vgui_DebugSystemPanel.h"
 #include "toolframework/itoolframework.h"
 #include "filesystem/IQueuedLoader.h"
-#include "rmlui_wrapper.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -114,7 +109,6 @@ extern HWND *pmainwindow;
 #endif
 
 extern IVEngineClient *engineClient;
-extern IRmlUI* rmlui;
 extern bool g_bTextMode;
 static int g_syncReportLevel = -1;
 
@@ -1749,8 +1743,7 @@ void CEngineVGui::Paint( PaintMode_t mode )
 {
 	VPROF_BUDGET( "CEngineVGui::Paint", VPROF_BUDGETGROUP_OTHER_VGUI );
 
-	if (rmlui)
-		rmlui->Draw();
+	g_ClientDLL->DrawUI();
 
 	if (g_bVGUIDisabled) return;
 

@@ -124,7 +124,6 @@
 #include "sourcevr/isourcevirtualreality.h"
 #include "client_virtualreality.h"
 #include "mumble.h"
-#include "rmlui_wrapper.h"
 // NVNT includes
 #include "hud_macros.h"
 #include "haptics/ihaptics.h"
@@ -218,7 +217,6 @@ IReplaySystem *g_pReplay = NULL;
 #endif
 
 IHaptics* haptics = NULL;// NVNT haptics system interface singleton
-IRmlUI* rmlui = NULL;
 
 //=============================================================================
 // HPE_BEGIN
@@ -736,7 +734,7 @@ public:
 	virtual void OnLevelLoadFinish(const char* msg);
 	virtual void OnLevelLoadStart();
 	virtual void UpdateProgressBar(float progress, const char* desc);
-
+	virtual void DrawUI();
 private:
 	void UncacheAllMaterials( );
 	void ResetStringTablePointers();
@@ -857,8 +855,6 @@ extern IGameSystem *ViewportClientSystem();
 
 //-----------------------------------------------------------------------------
 ISourceVirtualReality *g_pSourceVR = NULL;
-
-CSysModule* rmluimodule = nullptr;
 
 
 // Purpose: Called when the DLL is first loaded.
@@ -1098,42 +1094,6 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	HookHapticMessages(); // Always hook the messages
 #endif
 
-	rmluimodule = Sys_LoadModule("rmlui_utils" DLL_EXT_STRING);
-	if (!rmluimodule)
-	{
-		Warning("[RmlUi] Library load failed\n");
-		rmlui = nullptr;
-		return true;
-	}
-
-	CreateInterfaceFn rmlfactory = Sys_GetFactory(rmluimodule);
-	if (!rmlfactory)
-	{
-		Warning("[RmlUi] Failed to find factory\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-		return true;
-	}
-
-	rmlui = (IRmlUI*)rmlfactory(RMLUI_INTERFACE_VERSION, nullptr);
-	if (!rmlui)
-	{
-		Warning("[RmlUi] Failed to get interface\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-		return true;
-	}
-
-	if (!rmlui->Initialize(&appSystemFactory, 1))
-	{
-		Warning("RmlUi init failed\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-		return true;
-	}
 	return true;
 }
 
@@ -2711,6 +2671,10 @@ void CHLClient::OnLevelLoadStart()
 }
 
 void CHLClient::UpdateProgressBar(float progress, const char* desc)
+{
+}
+
+void CHLClient::DrawUI()
 {
 }
 // ===================== reserved for RmlUi =====================

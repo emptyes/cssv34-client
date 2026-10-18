@@ -82,7 +82,7 @@ projects={
 		'tier1',
 		'tier2',
 		'tier3',
-		'rmlui_utils',
+		'rmlui',
 		'thirdparty/plutovg/source',
 		'thirdparty/lua',
 		'vgui2/matsys_controls',

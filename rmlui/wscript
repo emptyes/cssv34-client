@@ -5,7 +5,7 @@ from waflib import Utils
 import os
 
 top = '.'
-PROJECT_NAME = 'rmlui_utils'
+PROJECT_NAME = 'rmlui'
 
 CORE_SOURCES = [
     "Core/BaseXMLParser.cpp",
@@ -277,7 +277,8 @@ def options(opt):
 def configure(conf):
 	#conf.define('_WINDOWS',1)
 	#conf.define('PROTECTED_THINGS_ENABLE',1)
-	conf.define('RMLUI_STATIC_LIB', 1)
+	conf.define('RMLUI_CORE_EXPORTS', 1)
+	conf.define('RMLUI_LUA_EXPORTS', 1)
 	conf.define('RMLUI_FONT_ENGINE', 'freetype')
 	conf.define('RMLUI_FONT_ENGINE_FREETYPE', 1)
 	conf.define('RMLUI_SVG_PLUGIN', 1)
@@ -286,12 +287,7 @@ def configure(conf):
 	conf.define('PLUTOVG_BUILD_STATIC', 1)
 
 def build(bld):
-    source = [
-        'rmlui_fileinterface.cpp',
-        'rmlui_systeminterface.cpp',
-        'rmlui_renderinterface.cpp',
-        'rmlui_main.cpp'
-    ]
+    source = []
 
     source += CORE_SOURCES
     source += ELEMENT_SOURCES

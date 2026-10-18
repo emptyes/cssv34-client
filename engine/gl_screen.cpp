@@ -31,7 +31,6 @@
 #include "replay_internal.h"
 #endif
 #include "tier0/vprof.h"
-#include <rmlui_wrapper.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -46,53 +45,12 @@ bool		scr_disabled_for_loading;
 bool		scr_drawloading;
 int			scr_nextdrawtick;		// A hack to let things settle on reload/reconnect
 
-CSysModule* rmluimodule = nullptr;
-IRmlUI* rmlui = nullptr;
-
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 void SCR_Init (void)
 {
-	rmluimodule = nullptr;
-	rmlui = nullptr;
 	scr_initialized = true;
-
-	rmluimodule = Sys_LoadModule("rmlui_utils" DLL_EXT_STRING);
-	if (!rmluimodule)
-	{
-		Warning("[RmlUi] Library load failed\n");
-		rmlui = nullptr;
-		return;
-	}
-
-	CreateInterfaceFn rmlfactory = Sys_GetFactory(rmluimodule);
-	if (!rmlfactory)
-	{
-		Warning("[RmlUi] Failed to find factory\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-		return;
-	}
-
-	rmlui = (IRmlUI*)rmlfactory(RMLUI_INTERFACE_VERSION, nullptr);
-	if (!rmlui)
-	{
-		Warning("[RmlUi] Failed to get interface\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-		return;
-	}
-
-	if (!rmlui->Initialize(&g_AppSystemFactory, 1))
-	{
-		Warning("RmlUi init failed\n");
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-		rmlui = nullptr;
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -100,13 +58,6 @@ void SCR_Init (void)
 //-----------------------------------------------------------------------------
 void SCR_Shutdown( void )
 {
-	if (rmlui)
-		rmlui->Shutdown();
-
-	if (rmluimodule) {
-		Sys_UnloadModule(rmluimodule);
-		rmluimodule = nullptr;
-	}
 	scr_initialized = false;
 }
 

@@ -796,6 +796,7 @@ public:
 	virtual void OnLevelLoadFinish(const char* msg) = 0;
 	virtual void OnLevelLoadStart() = 0;
 	virtual void UpdateProgressBar(float progress, const char* desc) = 0;
+	virtual void DrawUI() = 0;
 };
 
 #define CLIENT_DLL_INTERFACE_VERSION		"VClient017"
