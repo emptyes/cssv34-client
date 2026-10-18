@@ -362,7 +362,7 @@ private:
 	void DrawRenderCharInternal( const CharRenderInfo& info );
 
 private:
-	enum { BASE_HEIGHT = 768, BASE_WIDTH = 1024 };
+	enum { BASE_HEIGHT = 480, BASE_WIDTH = 640 };
 
 	struct PaintState_t
 	{
