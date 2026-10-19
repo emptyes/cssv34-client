@@ -30,6 +30,12 @@ jobs:
       env:
         ASAN_OPTIONS: detect_leaks=1
       run: python3 tests/stringtables/run_stringtable_tests.py --sanitize
+    - name: Test entity property decoding
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: |
+        python3 tests/entities/run_entity_decode_tests.py --sanitize
+        python3 tests/entities/run_entity_decode_tests.py --sanitize --debug
 
   build-windows-amd64:
     needs: test-network
