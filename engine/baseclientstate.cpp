@@ -1311,9 +1311,13 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 #endif
 
 	COM_TimestampedLog( " CBaseClient::ProcessCreateStringTable(%s)", msg->m_szTableName );
+	if ( !m_StringTableContainer )
+		return false;
+
 	m_StringTableContainer->AllowCreation( true );
 
     int startbit = msg->m_DataIn.GetNumBitsRead();
+	bool bValidUpdate = true;
 
 #ifndef SHARED_NET_STRING_TABLES
 
@@ -1321,6 +1325,11 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 		m_StringTableContainer->CreateStringTableEx( msg->m_szTableName, msg->m_nMaxEntries, msg->m_nUserDataSize, msg->m_nUserDataSizeBits, msg->m_bIsFilenames );
 
 	Assert ( table );
+	if ( !table )
+	{
+		m_StringTableContainer->AllowCreation( false );
+		return false;
+	}
 
 	table->SetTick( GetServerTickCount() ); // set creation tick
 
@@ -1335,8 +1344,8 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 		//              resource-usage limits at this level is a lost cause without a massive overhaul, but clamp these
 		//              to somewhat reasonable ranges to prevent overflows with less-audited code in the engine.
 		bool bSuccess = false;
-		if ( msg->m_DataIn.TotalBytesAvailable() > 0 &&
-		     msgCompressedSize <= (unsigned int)msg->m_DataIn.TotalBytesAvailable() &&
+		if ( !msg->m_DataIn.IsOverflowed() &&
+		     msgCompressedSize <= (unsigned int)( msg->m_DataIn.GetNumBitsLeft() / 8 ) &&
 		     msgCompressedSize < UINT_MAX/2 &&
 		     msgUncompressedSize < UINT_MAX/2 )
 		{
@@ -1354,12 +1363,14 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 			{
 				bf_read data( uncompressedBuffer, uncompressedSize );
 				table->ParseUpdate( data, msg->m_nNumEntries );
+				bSuccess = !data.IsOverflowed();
 			}
 
 			delete[] uncompressedBuffer;
 			delete[] compressedBuffer;
 		}
 
+		bValidUpdate = bSuccess;
 		if ( !bSuccess )
 		{
 			Assert( false );
@@ -1379,7 +1390,8 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 
 	COM_TimestampedLog( " CBaseClient::ProcessCreateStringTable(%s)-done", msg->m_szTableName );
 
-	return ( endbit - startbit ) == msg->m_nLength;	
+	return bValidUpdate && !msg->m_DataIn.IsOverflowed() &&
+		( endbit - startbit ) == msg->m_nLength;
 }
 
 bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
@@ -1397,6 +1409,9 @@ bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
 		CNetworkStringTable *table = (CNetworkStringTable*)
 			m_StringTableContainer->GetTable( msg->m_nTableID );
 
+		if ( !table )
+			return false;
+
 		table->ParseUpdate( msg->m_DataIn, msg->m_nChangedEntries );
 	}
 	else
@@ -1408,7 +1423,7 @@ bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
 
 	int endbit = msg->m_DataIn.GetNumBitsRead();
 
-	return ( endbit - startbit ) == msg->m_nLength;
+	return !msg->m_DataIn.IsOverflowed() && ( endbit - startbit ) == msg->m_nLength;
 }
 
 

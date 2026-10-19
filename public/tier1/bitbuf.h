@@ -389,25 +389,29 @@ inline void	bf_write::WriteOneBitAt( int iBit, int nValue )
 
 BITBUF_INLINE void bf_write::WriteUBitLong( unsigned int curData, int numbits, bool bCheckRange ) RESTRICT
 {
-#ifdef _DEBUG
-	// Make sure it doesn't overflow.
-	if ( bCheckRange && numbits < 32 )
-	{
-		if ( curData >= (uint32)(1 << numbits) )
-		{
-			CallErrorHandler( BITBUFERROR_VALUE_OUT_OF_RANGE, GetDebugName() );
-		}
-	}
-	Assert( numbits >= 0 && numbits <= 32 );
-#endif
+	if ( numbits == 0 )
+		return;
 
-	if ( GetNumBitsLeft() < numbits )
+	if ( numbits < 0 || numbits > 32 || m_iCurBit < 0 || m_iCurBit > m_nDataBits ||
+		m_nDataBits - m_iCurBit < numbits )
 	{
 		m_iCurBit = m_nDataBits;
 		SetOverflowFlag();
 		CallErrorHandler( BITBUFERROR_BUFFER_OVERRUN, GetDebugName() );
 		return;
 	}
+
+#ifdef _DEBUG
+	// Make sure it doesn't overflow.
+	if ( bCheckRange && numbits < 32 )
+	{
+		if ( curData >= (uint32)(1u << numbits) )
+		{
+			CallErrorHandler( BITBUFERROR_VALUE_OUT_OF_RANGE, GetDebugName() );
+		}
+	}
+	Assert( numbits >= 0 && numbits <= 32 );
+#endif
 
 	int iCurBitMasked = m_iCurBit & 31;
 	int iDWord = m_iCurBit >> 5;
@@ -418,10 +422,10 @@ BITBUF_INLINE void bf_write::WriteUBitLong( unsigned int curData, int numbits, b
     uint32 * RESTRICT pOut = &m_pData[iDWord];
 
 	// Rotate data into dword alignment
-	curData = (curData << iCurBitMasked) | (curData >> (32 - iCurBitMasked));
+	curData = (curData << iCurBitMasked) | (curData >> ((32 - iCurBitMasked) & 31));
 
 	// Calculate bitmasks for first and second word
-	unsigned int temp = 1 << (numbits-1);
+	unsigned int temp = 1u << (numbits-1);
 	unsigned int mask1 = (temp*2-1) << iCurBitMasked;
 	unsigned int mask2 = (temp-1) >> (31 - iCurBitMasked);
 	
@@ -445,10 +449,10 @@ BITBUF_INLINE void bf_write::WriteUBitVar( unsigned int data )
 	unsigned int bits = 0;
 	unsigned int base = 0;
 
-	while (data > (base << 1))
+	while (bits < 32 && data > (base << 1))
 	{
 		bits++;
-		base = (1 << bits) - 1;
+		base = (base << 1) | 1u;
 	}
 
 	// how many bits do we use
@@ -755,26 +759,55 @@ inline float bf_read::ReadBitFloat()
 
 BITBUF_INLINE unsigned int bf_read::ReadUBitVar()
 {
+	if ( IsOverflowed() )
+		return 0;
+
 	int bits = 0; // how many bits are used to encode delta offset
 
 	// how many bits do we use
 	while (ReadOneBit() == 0)
-		bits++;
+	{
+		if ( IsOverflowed() )
+			return 0;
 
-	unsigned int data = (1 << bits) - 1;
+		if ( ++bits > 32 )
+		{
+			SetOverflowFlag();
+			CallErrorHandler( BITBUFERROR_BUFFER_OVERRUN, GetDebugName() );
+			return 0;
+		}
+	}
+
+	unsigned int data = bits == 32 ? ~0u : (1u << bits) - 1;
 
 	// read the value
 	if (bits > 0)
-		data += ReadUBitLong(bits);
+	{
+		unsigned int value = ReadUBitLong(bits);
+		if ( IsOverflowed() )
+			return 0;
+
+		if ( value > ~0u - data )
+		{
+			SetOverflowFlag();
+			CallErrorHandler( BITBUFERROR_BUFFER_OVERRUN, GetDebugName() );
+			return 0;
+		}
+		data += value;
+	}
 
 	return data;
 }
 
 BITBUF_INLINE unsigned int bf_read::ReadUBitLong( int numbits ) RESTRICT
 {
+	if ( numbits == 0 )
+		return 0;
+
 	Assert( numbits > 0 && numbits <= 32 );
 
-	if ( GetNumBitsLeft() < numbits )
+	if ( numbits < 0 || numbits > 32 || m_iCurBit < 0 || m_iCurBit > m_nDataBits ||
+		m_nDataBits - m_iCurBit < numbits )
 	{
 		m_iCurBit = m_nDataBits;
 		SetOverflowFlag();
@@ -796,7 +829,7 @@ BITBUF_INLINE unsigned int bf_read::ReadUBitLong( int numbits ) RESTRICT
 #endif
 
 	unsigned int dw1 = LoadLittleDWord( (uint32* RESTRICT)m_pData, iWordOffset1 ) >> iStartBit;
-	unsigned int dw2 = LoadLittleDWord( (uint32* RESTRICT)m_pData, iWordOffset2 ) << (32 - iStartBit);
+	unsigned int dw2 = LoadLittleDWord( (uint32* RESTRICT)m_pData, iWordOffset2 ) << ((32 - iStartBit) & 31);
 
 	return (dw1 | dw2) & bitmask;
 }

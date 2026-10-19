@@ -1155,7 +1155,11 @@ bool SVC_UpdateStringTable::ReadFromBuffer( bf_read &buffer )
 	}
 	
 	m_nLength = buffer.ReadWord();
+	if ( buffer.IsOverflowed() || m_nLength > buffer.GetNumBitsLeft() )
+		return false;
+
 	m_DataIn = buffer;
+	m_DataIn.m_nDataBits = buffer.GetNumBitsRead() + m_nLength;
 	return buffer.SeekRelative( m_nLength );
 }
 
@@ -1217,8 +1221,14 @@ bool SVC_CreateStringTable::ReadFromBuffer( bf_read &buffer )
 	}
 
 	m_szTableName = m_szTableNameBuffer;
-	buffer.ReadString( m_szTableNameBuffer, sizeof(m_szTableNameBuffer) );
+	if ( !buffer.ReadString( m_szTableNameBuffer, sizeof(m_szTableNameBuffer) ) )
+		return false;
+
 	m_nMaxEntries = buffer.ReadWord();
+	if ( buffer.IsOverflowed() || m_nMaxEntries <= 0 ||
+		( m_nMaxEntries & ( m_nMaxEntries - 1 ) ) != 0 )
+		return false;
+
 	int encodeBits = Q_log2( m_nMaxEntries );
 	m_nNumEntries = buffer.ReadUBitLong( encodeBits+1 );
 	m_nLength = buffer.ReadUBitLong( NET_MAX_PAYLOAD_BITS_V23 + 3 );
@@ -1228,6 +1238,8 @@ bool SVC_CreateStringTable::ReadFromBuffer( bf_read &buffer )
 	{
 		m_nUserDataSize = buffer.ReadUBitLong( 12 );
 		m_nUserDataSizeBits = buffer.ReadUBitLong( 4 );
+		if ( m_nUserDataSize <= 0 || m_nUserDataSizeBits > m_nUserDataSize * 8 )
+			return false;
 	}
 	else
 	{
@@ -1237,7 +1249,12 @@ bool SVC_CreateStringTable::ReadFromBuffer( bf_read &buffer )
 
 	m_bDataCompressed = false;
 
+	if ( buffer.IsOverflowed() || m_nNumEntries > m_nMaxEntries ||
+		m_nLength > buffer.GetNumBitsLeft() )
+		return false;
+
 	m_DataIn = buffer;
+	m_DataIn.m_nDataBits = buffer.GetNumBitsRead() + m_nLength;
 	return buffer.SeekRelative( m_nLength );
 }
 

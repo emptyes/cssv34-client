@@ -885,8 +885,9 @@ void CBaseGamesPage::UpdateFilterAndQuickListVisibility()
 
 	m_bFiltersVisible = !showQuickList && !m_pCustomResFilename && showFilter;
 	
-	int wide, tall;
-	GetSize( wide, tall );
+	const bool bPageVisible = IsVisible();
+	int x, y, wide, tall;
+	GetBounds( x, y, wide, tall );
 
 	int w = 640; int h = 384;
 
@@ -904,7 +905,8 @@ void CBaseGamesPage::UpdateFilterAndQuickListVisibility()
 		m_pGameList->SetFont( m_hFont );
 	}
 
-	SetSize( wide, tall );
+	SetBounds( x, y, wide, tall );
+	SetVisible( bPageVisible );
 
 	m_pQuickList->SetVisible( showQuickList );
 	m_pGameList->SetVisible( !showQuickList );
