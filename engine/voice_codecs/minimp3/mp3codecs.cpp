@@ -37,6 +37,8 @@ int mp3dec_seek_callback(uint64_t position, void *user_data)
 class CMiniMP3 : public IAudioStream
 {
 public:
+	CMiniMP3() : mp3d(), mp3io(), audio_stream() {}
+	virtual ~CMiniMP3() { mp3dec_ex_close( &mp3d ); }
 	bool Init( IAudioStreamEvent *pHandler );
 
 	// IAudioStream functions
@@ -57,6 +59,10 @@ private:
 bool CMiniMP3::Init( IAudioStreamEvent *pHandler )
 {
 //	printf("CMiniMP3::Init\n");
+
+	mp3dec_ex_close( &mp3d );
+	if ( !pHandler )
+		return false;
 
 	audio_stream.stream_event = pHandler;
 	audio_stream.offset = 0;

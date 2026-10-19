@@ -26,10 +26,10 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     source = (args.source or root / 'game/client/cstrike/VGUI/cstrikeclientscoreboard.cpp').read_text()
-    signatures = ('static bool HasClientModMarker(', 'static bool IsClientModPlayer(',
+    signatures = ('static bool HasClientModMarker(', 'static bool HasPossibleClientModMarker(',
                   'CON_COMMAND( cl_clientmod_list,')
     extracted = '\n'.join(function(source, name) for name in signatures)
-    assert 'pUTF8Clan = IsClientModPlayer( playerIndex ) ? "CM" : "";' in source
+    assert 'pUTF8Clan = HasClientModMarker( pi ) ? "CM" : ( HasPossibleClientModMarker( pi ) ? "CM?" : "" );' in source
     with tempfile.TemporaryDirectory(prefix='cssv34-clientmod-') as directory:
         output = Path(directory)
         (output / 'clientmod_under_test.inc').write_text(extracted)

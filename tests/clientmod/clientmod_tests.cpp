@@ -93,16 +93,16 @@ int main()
                 CHECK(HasClientModMarker(pi) == (marker == 8 && flags == 0));
             }
     Add(1, true);
-    CHECK(IsClientModPlayer(1));
-    CHECK(!IsClientModPlayer(2));
+    CHECK(HasClientModMarker(storage.players[1]));
+    CHECK(!HasClientModMarker(storage.players[2]));
     Add(1, false, 1234);
-    CHECK(!IsClientModPlayer(1));
+    CHECK(!HasClientModMarker(storage.players[1]));
     Add(1, true);
     storage.players[1].fakeplayer = true;
-    CHECK(!IsClientModPlayer(1));
+    CHECK(!HasClientModMarker(storage.players[1]));
     storage.players[1].fakeplayer = false;
     storage.players[1].ishltv = true;
-    CHECK(!IsClientModPlayer(1));
+    CHECK(!HasClientModMarker(storage.players[1]));
     Reset();
     Add(1, true);
     Add(3, true, 0xffffffffu);
@@ -113,7 +113,7 @@ int main()
     storage.players[6].ishltv = true;
     Add(64, false);
     cl_clientmod_list(CCommand{"cl_clientmod_list"});
-    CHECK(Contains("ClientMod markers: 2 / 4; Unknown: 2"));
+    CHECK(Contains("ClientMod markers: 2; Possible: 0; Unknown: 2; Total: 4"));
     CHECK(Contains("Unknown"));
     CHECK(!Contains("userid="));
     CHECK(!Contains("Original"));
@@ -126,7 +126,7 @@ int main()
     storage.players[1].friendsName[2] = (char)0x80;
     std::memset(storage.players[1].name, '%', sizeof(storage.players[1].name));
     cl_clientmod_list(CCommand{"cl_clientmod_list", "1"});
-    CHECK(Contains("friendsID=0 friendsName[0..7]=08 FF 80 00 00 00 00 00"));
+    CHECK(Contains("friendsID=0 friendsName=08 FF 80 00 00 00 00 00"));
     CHECK(Contains("friendsID=4294967295"));
     CHECK(Contains("userid=101"));
     CHECK(Contains(std::string(32, '%').c_str()));
@@ -135,18 +135,18 @@ int main()
     Reset(1);
     Add(1, true);
     cl_clientmod_list(CCommand{"cl_clientmod_list"});
-    CHECK(Contains("ClientMod markers: 1 / 1; Unknown: 0"));
+    CHECK(Contains("ClientMod markers: 1; Possible: 0; Unknown: 0; Total: 1"));
     storage.present[1] = false;
     printed.clear();
     cl_clientmod_list(CCommand{"cl_clientmod_list"});
-    CHECK(Contains("ClientMod markers: 0 / 0; Unknown: 0"));
+    CHECK(Contains("ClientMod markers: 0; Possible: 0; Unknown: 0; Total: 0"));
     Add(1, false);
     printed.clear();
     cl_clientmod_list(CCommand{"cl_clientmod_list"});
-    CHECK(Contains("ClientMod markers: 0 / 1; Unknown: 1"));
+    CHECK(Contains("ClientMod markers: 0; Possible: 0; Unknown: 1; Total: 1"));
     Reset(0);
     cl_clientmod_list(CCommand{"cl_clientmod_list", "1"});
-    CHECK(Contains("ClientMod markers: 0 / 0; Unknown: 0"));
+    CHECK(Contains("ClientMod markers: 0; Possible: 0; Unknown: 0; Total: 0"));
     const CCommand invalid[] = {CCommand{"cl_clientmod_list", "0"},
         CCommand{"cl_clientmod_list", "01"}, CCommand{"cl_clientmod_list", "1", "extra"}};
     for (const CCommand &args : invalid)
@@ -157,5 +157,41 @@ int main()
         for (int slot = 1; slot <= 64; ++slot)
             CHECK(storage.calls[slot] == 0);
     }
+    const char *textMarkers[] = {"cmsFB3Nh", "cmF4EtoX", "cmxvPMm3", "cmABC+/_", "cmab-_09"};
+    for (const char *marker : textMarkers)
+    {
+        Reset(1);
+        Add(1, false);
+        std::strcpy(storage.players[1].friendsName, marker);
+        CHECK(HasPossibleClientModMarker(storage.players[1]));
+        cl_clientmod_list(CCommand{"cl_clientmod_list", "1"});
+        CHECK(Contains("ClientMod?"));
+        CHECK(Contains("ClientMod markers: 0; Possible: 1; Unknown: 0; Total: 1"));
+        storage.players[1].fakeplayer = true;
+        CHECK(!HasPossibleClientModMarker(storage.players[1]));
+        storage.players[1].fakeplayer = false;
+        storage.players[1].ishltv = true;
+        CHECK(!HasPossibleClientModMarker(storage.players[1]));
+    }
+    for (int value = 0; value < 256; ++value)
+    {
+        pi = player_info_t();
+        std::memcpy(pi.friendsName, "cmABCDEF", 8);
+        pi.friendsName[4] = (char)value;
+        const bool allowed = (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') ||
+            (value >= '0' && value <= '9') || value == '+' || value == '/' || value == '-' || value == '_';
+        CHECK(HasPossibleClientModMarker(pi) == allowed);
+    }
+    const char *invalidMarkers[] = {"", "cm", "cmABC", "CMABCDEF", "steam123", "cmABC DE", "cmABC=DE"};
+    for (const char *marker : invalidMarkers)
+    {
+        pi = player_info_t();
+        std::strcpy(pi.friendsName, marker);
+        CHECK(!HasPossibleClientModMarker(pi));
+    }
+    pi = player_info_t();
+    std::memset(pi.friendsName, 'A', sizeof(pi.friendsName));
+    pi.friendsName[0] = 'c'; pi.friendsName[1] = 'm';
+    CHECK(HasPossibleClientModMarker(pi));
     std::printf("PASS: %d checks\n", checks);
 }

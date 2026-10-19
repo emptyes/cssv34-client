@@ -252,6 +252,36 @@ static int MP3_ReadSampleRateFromHeader( const char *pFileName )
 	return 0;
 }
 
+CON_COMMAND( snd_probe_mp3, "Inspect a relative MP3 filename under sound/ without playing it" )
+{
+	if ( args.ArgC() != 2 )
+	{
+		Msg( "Usage: snd_probe_mp3 <relative MP3 filename under sound/>\n" );
+		return;
+	}
+	const char *name = args[1];
+	const int length = Q_strlen( name );
+	if ( length < 5 || length >= 256 || name[0] == '/' || name[0] == '\\' ||
+		Q_strstr( name, ".." ) || Q_strstr( name, ":" ) ||
+		Q_stricmp( name + length - 4, ".mp3" ) != 0 )
+	{
+		Msg( "MP3 probe: expected a relative .mp3 filename under sound/.\n" );
+		return;
+	}
+	intp file = g_pSndIO->open( name );
+	if ( file == 0 || file == -1 )
+	{
+		Msg( "MP3 probe: unavailable through GAME search paths: sound/%s\n", name );
+		return;
+	}
+	const unsigned int size = g_pSndIO->size( file );
+	g_pSndIO->close( file );
+	const int rate = MP3_ReadSampleRateFromHeader( name );
+	Msg( "MP3 probe: sound/%s bytes=%u header_rate=%d\n", name, size, rate );
+	if ( rate == 0 )
+		Msg( "MP3 probe: no MPEG sample rate found by the bounded header scan; decoding was not tested.\n" );
+}
+
 int CAudioSourceMP3::SampleRate()
 {
 	if ( !m_sampleRate && !m_bTriedHeaderSampleRate )

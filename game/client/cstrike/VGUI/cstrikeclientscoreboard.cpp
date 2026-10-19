@@ -48,10 +48,18 @@ static bool HasClientModMarker( const player_info_t &pi )
 	return !pi.fakeplayer && !pi.ishltv && (unsigned char)pi.friendsName[0] == 0x08;
 }
 
-static bool IsClientModPlayer( int playerIndex )
+static bool HasPossibleClientModMarker( const player_info_t &pi )
 {
-	player_info_t pi;
-	return engine->GetPlayerInfo( playerIndex, &pi ) && HasClientModMarker( pi );
+	if ( pi.fakeplayer || pi.ishltv || pi.friendsName[0] != 'c' || pi.friendsName[1] != 'm' )
+		return false;
+	for ( int i = 2; i < 8; ++i )
+	{
+		const unsigned char c = (unsigned char)pi.friendsName[i];
+		if ( !( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) ||
+			( c >= '0' && c <= '9' ) || c == '+' || c == '/' || c == '-' || c == '_' ) )
+			return false;
+	}
+	return true;
 }
 
 CON_COMMAND( cl_clientmod_list, "List ClientMod markers; use cl_clientmod_list 1 for diagnostics. Unknown does not mean Original." )
@@ -63,26 +71,29 @@ CON_COMMAND( cl_clientmod_list, "List ClientMod markers; use cl_clientmod_list 1
 		return;
 	}
 
-	int cm = 0, total = 0;
+	int cm = 0, possible = 0, total = 0;
 	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
 	{
 		player_info_t pi;
 		if ( !engine->GetPlayerInfo( i, &pi ) || pi.fakeplayer || pi.ishltv )
 			continue;
 		const bool bCM = HasClientModMarker( pi );
+		const bool bPossible = !bCM && HasPossibleClientModMarker( pi );
 		total++;
 		if ( bCM )
 			cm++;
-		Msg( "%2d  %-10s %.*s\n", i, bCM ? "ClientMod" : "Unknown", (int)sizeof(pi.name), pi.name );
+		if ( bPossible )
+			possible++;
+		Msg( "%2d  %-10s %.*s\n", i, bCM ? "ClientMod" : ( bPossible ? "ClientMod?" : "Unknown" ), (int)sizeof(pi.name), pi.name );
 		if ( diagnostics )
 		{
-			Msg( "    userid=%d friendsID=%u friendsName[0..7]=", pi.userID, (unsigned int)pi.friendsID );
-			for ( int j = 0; j < 8; j++ )
-				Msg( "%02X%s", (unsigned int)(unsigned char)pi.friendsName[j], j == 7 ? "\n" : " " );
+			Msg( "    userid=%d friendsID=%u friendsName=", pi.userID, (unsigned int)pi.friendsID );
+			for ( int j = 0; j < (int)sizeof(pi.friendsName); j++ )
+				Msg( "%02X%s", (unsigned int)(unsigned char)pi.friendsName[j], j == (int)sizeof(pi.friendsName) - 1 ? "\n" : " " );
 		}
 	}
-	Msg( "ClientMod markers: %d / %d; Unknown: %d\n", cm, total, total - cm );
-	Msg( "No marker does not identify the client. Markers are not authentication.\n" );
+	Msg( "ClientMod markers: %d; Possible: %d; Unknown: %d; Total: %d\n", cm, possible, total - cm - possible, total );
+	Msg( "ClientMod? is an unverified text marker. No marker does not identify the client. Markers are not authentication.\n" );
 }
 
 ConVar cl_scoreboard_ct_color_red( "cl_scoreboard_ct_color_red", "150", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data red channel", true, 0.0f, true, 255.0f );
@@ -922,7 +933,12 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 				{
 					const char* pUTF8Clan = pPlayerScore->szClanTag;
 					if ( cl_scoreboard_show_clientmod.GetBool() )
-						pUTF8Clan = IsClientModPlayer( playerIndex ) ? "CM" : "";
+					{
+						player_info_t pi;
+						pUTF8Clan = "";
+						if ( engine->GetPlayerInfo( playerIndex, &pi ) )
+							pUTF8Clan = HasClientModMarker( pi ) ? "CM" : ( HasPossibleClientModMarker( pi ) ? "CM?" : "" );
+					}
 					AdjustFontToFit( pUTF8Clan, playerDisplay.pClanLabel );
 
 					// "CM" belongs to the CLIENT column: center it under the header instead of
