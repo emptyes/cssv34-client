@@ -20,6 +20,16 @@ jobs:
       env:
         ASAN_OPTIONS: detect_leaks=1
       run: python3 tests/network/run_split_packet_tests.py --sanitize
+    - name: Test bit buffer boundaries and wire encoding
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: |
+        python3 tests/bitbuf/run_bitbuf_tests.py --sanitize
+        python3 tests/bitbuf/run_bitbuf_tests.py --sanitize --debug
+    - name: Test string table message boundaries and updates
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: python3 tests/stringtables/run_stringtable_tests.py --sanitize
 
   build-windows-amd64:
     needs: test-network
@@ -102,22 +112,3 @@ jobs:
         files: |
           cssv34_win64_optimized.zip
           cssv34_win64_pdb.7z
-
-  build-android-armv7a:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Build android-armv7a
-      run: |
-        chmod +x waf
-        chmod +x scripts/build-android-armv7a.sh
-        ./scripts/build-android-armv7a.sh
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v7.0.1
-      with:
-        name: android_armv7a_build
-        path: android_armv7a_build
-        if-no-files-found: error
-        retention-days: 7
