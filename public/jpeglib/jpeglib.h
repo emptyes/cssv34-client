@@ -1,3 +1,9 @@
+// Windows: use the headers of the same libjpeg 9a sources that lib/win32/amd64/libjpeg.lib
+// is built from (old headers here had a different version -> library init failed).
+#if defined(_WIN32) && !defined(ANDROID)
+#include "../../thirdparty/libjpeg/jpeglib.h"
+#else
+
 /*
  * jpeglib.h
  *
@@ -1156,3 +1162,5 @@ struct jpeg_color_quantizer { long dummy; };
 #endif
 
 #endif /* JPEGLIB_H */
+
+#endif // _WIN32
