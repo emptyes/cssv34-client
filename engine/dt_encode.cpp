@@ -252,7 +252,7 @@ void Int_Decode(DecodeInfo* pInfo)
 		pInfo->m_Value.m_Int = pInfo->m_pIn->ReadSBitLong(pInfo->m_pProp->m_nBits);
 	}
 
-	if (pInfo->m_pRecvProp)
+	if ( !pInfo->m_pIn->IsOverflowed() && pInfo->m_pRecvProp )
 	{
 		pInfo->m_pRecvProp->GetProxyFn()(pInfo, pInfo->m_pStruct, pInfo->m_pData);
 	}
@@ -311,7 +311,7 @@ void Float_Decode( DecodeInfo *pInfo )
 {
 	pInfo->m_Value.m_Float = DecodeFloat(pInfo->m_pProp, pInfo->m_pIn);
 
-	if ( pInfo->m_pRecvProp )
+	if ( !pInfo->m_pIn->IsOverflowed() && pInfo->m_pRecvProp )
 		pInfo->m_pRecvProp->GetProxyFn()( pInfo, pInfo->m_pStruct, pInfo->m_pData );
 }
 
@@ -427,7 +427,7 @@ void Vector_Decode(DecodeInfo *pInfo)
 {
 	DecodeVector( pInfo->m_pProp, pInfo->m_pIn, pInfo->m_Value.m_Vector );
 	
-	if( pInfo->m_pRecvProp )
+	if ( !pInfo->m_pIn->IsOverflowed() && pInfo->m_pRecvProp )
 		pInfo->m_pRecvProp->GetProxyFn()( pInfo, pInfo->m_pStruct, pInfo->m_pData );
 }
 
@@ -598,23 +598,22 @@ void String_Encode( const unsigned char *pStruct, DVariant *pVar, const SendProp
 
 void String_Decode(DecodeInfo *pInfo)
 {
-	// Read it in.
 	int len = pInfo->m_pIn->ReadUBitLong( DT_MAX_STRING_BITS );
-
-	char *tempStr = pInfo->m_TempStr;
-
-	if ( len >= DT_MAX_STRING_BUFFERSIZE )
+	if ( pInfo->m_pIn->IsOverflowed() || len >= DT_MAX_STRING_BUFFERSIZE ||
+		len * 8 > pInfo->m_pIn->GetNumBitsLeft() )
 	{
-		Warning( "String_Decode( %s ) invalid length (%d)\n", pInfo->m_pRecvProp->GetName(), len );
-		len = DT_MAX_STRING_BUFFERSIZE - 1;
+		pInfo->m_pIn->SetOverflowFlag();
+		return;
 	}
 
-	pInfo->m_pIn->ReadBits( tempStr, len*8 );
-	tempStr[len] = 0;
+	char *tempStr = pInfo->m_TempStr;
+	pInfo->m_pIn->ReadBits( tempStr, len * 8 );
+	if ( pInfo->m_pIn->IsOverflowed() )
+		return;
 
+	tempStr[len] = 0;
 	pInfo->m_Value.m_pString = tempStr;
 
-	// Give it to the RecvProxy.
 	if ( pInfo->m_pRecvProp )
 		pInfo->m_pRecvProp->GetProxyFn()( pInfo, pInfo->m_pStruct, pInfo->m_pData );
 }
@@ -752,74 +751,95 @@ void Array_Encode( const unsigned char *pStruct, DVariant *pVar, const SendProp 
 }
 
 
+static int ReadArrayLength( const SendProp *pProp, bf_read *pIn )
+{
+	SendProp *pArrayProp = pProp->GetArrayProp();
+	if ( !pArrayProp || pArrayProp->GetType() < 0 ||
+		pArrayProp->GetType() >= DPT_NUMSendPropTypes || pArrayProp->GetType() == DPT_DataTable )
+	{
+		pIn->SetOverflowFlag();
+		return -1;
+	}
+
+	int nElements = pIn->ReadUBitLong( pProp->GetNumArrayLengthBits() );
+	if ( pIn->IsOverflowed() || nElements < 0 || nElements > pProp->GetNumElements() )
+	{
+		pIn->SetOverflowFlag();
+		return -1;
+	}
+
+	return nElements;
+}
+
+
 void Array_Decode( DecodeInfo *pInfo )
 {
-	SendProp *pArrayProp = pInfo->m_pProp->GetArrayProp();
-	AssertMsg( pArrayProp, ("Array_Decode: missing m_pArrayProp for a property.") );
+	int nElements = ReadArrayLength( pInfo->m_pProp, pInfo->m_pIn );
+	if ( nElements < 0 )
+		return;
 
-	// Setup a DecodeInfo that is used to decode each of the child properties.
+	SendProp *pArrayProp = pInfo->m_pProp->GetArrayProp();
 	DecodeInfo subDecodeInfo;
 	subDecodeInfo.CopyVars( pInfo );
 	subDecodeInfo.m_pProp = pArrayProp;
 
-	int elementStride = 0;	
+	int elementStride = 0;
 	ArrayLengthRecvProxyFn lengthProxy = 0;
 	if ( pInfo->m_pRecvProp )
 	{
 		RecvProp *pArrayRecvProp = pInfo->m_pRecvProp->GetArrayProp();
-		subDecodeInfo.m_pRecvProp = pArrayRecvProp;
-		
-		// Note we get the OFFSET from the array element property and the STRIDE from the array itself.
-		subDecodeInfo.m_pData = (char*)pInfo->m_pData + pArrayRecvProp->GetOffset();
 		elementStride = pInfo->m_pRecvProp->GetElementStride();
-		Assert( elementStride != -1 ); // (Make sure it was set..)
+		if ( !pArrayRecvProp || nElements > pInfo->m_pRecvProp->GetNumElements() || elementStride < 0 )
+		{
+			pInfo->m_pIn->SetOverflowFlag();
+			return;
+		}
 
+		subDecodeInfo.m_pRecvProp = pArrayRecvProp;
+		if ( subDecodeInfo.m_pData )
+			subDecodeInfo.m_pData = (char*)subDecodeInfo.m_pData + pArrayRecvProp->GetOffset();
 		lengthProxy = pInfo->m_pRecvProp->GetArrayLengthProxy();
 	}
-
-	int nElements = pInfo->m_pIn->ReadUBitLong( pInfo->m_pProp->GetNumArrayLengthBits() );
 
 	if ( lengthProxy )
 		lengthProxy( pInfo->m_pStruct, pInfo->m_ObjectID, nElements );
 
-	for ( subDecodeInfo.m_iElement=0; subDecodeInfo.m_iElement < nElements; subDecodeInfo.m_iElement++ )
+	for ( subDecodeInfo.m_iElement = 0; subDecodeInfo.m_iElement < nElements; ++subDecodeInfo.m_iElement )
 	{
 		g_PropTypeFns[pArrayProp->GetType()].Decode( &subDecodeInfo );
-		subDecodeInfo.m_pData = (char*)subDecodeInfo.m_pData + elementStride;
+		if ( pInfo->m_pIn->IsOverflowed() )
+			return;
+		if ( subDecodeInfo.m_pData )
+			subDecodeInfo.m_pData = (char*)subDecodeInfo.m_pData + elementStride;
 	}
 }
 
 
 int Array_CompareDeltas( const SendProp *pProp, bf_read *p1, bf_read *p2 )
 {
+	int length1 = ReadArrayLength( pProp, p1 );
+	int length2 = ReadArrayLength( pProp, p2 );
+	if ( length1 < 0 || length2 < 0 )
+		return true;
+
 	SendProp *pArrayProp = pProp->GetArrayProp();
-	AssertMsg( pArrayProp, ("Array_CompareDeltas: missing m_pArrayProp for SendProp '%s'.", pProp->m_pVarName) );
-
-	int nLengthBits = pProp->GetNumArrayLengthBits(); 
-	int length1 = p1->ReadUBitLong( nLengthBits );
-	int length2 = p2->ReadUBitLong( nLengthBits );
-
 	int bDifferent = length1 != length2;
-	
-	// Compare deltas on the props that are the same.
 	int nSame = min( length1, length2 );
-	for ( int iElement=0; iElement < nSame; iElement++ )
+	for ( int iElement = 0; iElement < nSame; ++iElement )
 	{
 		bDifferent |= g_PropTypeFns[pArrayProp->GetType()].CompareDeltas( pArrayProp, p1, p2 );
+		if ( p1->IsOverflowed() || p2->IsOverflowed() )
+			return true;
 	}
 
-	// Now just eat up the remaining properties in whichever buffer was larger.
 	if ( length1 != length2 )
 	{
 		bf_read *buffer = (length1 > length2) ? p1 : p2;
-
 		int nExtra = max( length1, length2 ) - nSame;
-		for ( int iEatUp=0; iEatUp < nExtra; iEatUp++ )
-		{
+		for ( int iEatUp = 0; iEatUp < nExtra && !buffer->IsOverflowed(); ++iEatUp )
 			SkipPropData( buffer, pArrayProp );
-		}
 	}
-	
+
 	return bDifferent;
 }
 
@@ -880,32 +900,26 @@ void Array_DecodeZero( DecodeInfo *pInfo )
 
 bool Array_IsEncodedZero( const SendProp *pProp, bf_read *pIn )
 {
+	int nElements = ReadArrayLength( pProp, pIn );
+	if ( nElements < 0 )
+		return false;
+
 	SendProp *pArrayProp = pProp->GetArrayProp();
-	AssertMsg( pArrayProp, ("Array_IsEncodedZero: missing m_pArrayProp for a property.") );
-
-	int nElements = pIn->ReadUBitLong( pProp->GetNumArrayLengthBits() );
-
-	for ( int i=0; i < nElements;  i++ )
-	{
-		// skip over data
+	for ( int i = 0; i < nElements && !pIn->IsOverflowed(); ++i )
 		g_PropTypeFns[pArrayProp->GetType()].IsEncodedZero( pArrayProp, pIn );
-	}
-	
-	return nElements == 0;;
+
+	return !pIn->IsOverflowed() && nElements == 0;
 }
 
 void Array_SkipProp( const SendProp *pProp, bf_read *pIn )
 {
+	int nElements = ReadArrayLength( pProp, pIn );
+	if ( nElements < 0 )
+		return;
+
 	SendProp *pArrayProp = pProp->GetArrayProp();
-	AssertMsg( pArrayProp, ("Array_SkipProp: missing m_pArrayProp for a property.") );
-
-	int nElements = pIn->ReadUBitLong( pProp->GetNumArrayLengthBits() );
-
-	for ( int i=0; i < nElements;  i++ )
-	{
-		// skip over data
+	for ( int i = 0; i < nElements && !pIn->IsOverflowed(); ++i )
 		g_PropTypeFns[pArrayProp->GetType()].SkipProp( pArrayProp, pIn );
-	}
 }
 
 

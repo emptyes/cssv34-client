@@ -800,7 +800,7 @@ void CServerBrowserDialog::OnConnectToGame( KeyValues *pMessageValues )
 	m_CurrentConnection.m_NetAdr.SetQueryPort( queryPort );
 	m_CurrentConnection.m_NetAdr.SetConnectionPort( (unsigned short)connectionPort );
 
-	m_CurrentServerAdr.SetIPAndPort( unIP, (unsigned short)connectionPort );
+	m_CurrentServerAdr = netadr_t( unIP, (unsigned short)connectionPort );
 
 	// remember the server in the history tab (not our own local game)
 	if ( m_pHistory && !m_CurrentServerAdr.IsLocalhost() )

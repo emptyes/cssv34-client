@@ -4220,7 +4220,8 @@ public:
 	bool QueueRenderable( IClientRenderable *pRenderable, bool bTwoPass );
 
 	// Draws the queued smoke (far to near), then the renderables in front of it
-	void DrawQueued( bool bShadowDepth );
+	void DrawQueued( bool bShadowDepth, bool bRenderingWaterRenderTargets = false );
+	void DrawRenderable( IClientRenderable *pRenderable, bool bTwoPass, bool bShadowDepth );
 
 private:
 	struct Smoke_t
@@ -4303,10 +4304,6 @@ bool CSmokeTranslucentOrder::QueueRenderable( IClientRenderable *pRenderable, bo
 		}
 	}
 
-	// these need the frame buffer copies done in the main loop
-	if ( pRenderable->UsesPowerOfTwoFrameBufferTexture() || pRenderable->UsesFullFrameBufferTexture() )
-		return false;
-
 	if ( m_nFront >= MAX_FRONT_TRANSLUCENTS || m_flNearestSmoke <= 0.0f )
 		return false;
 
@@ -4325,7 +4322,27 @@ bool CSmokeTranslucentOrder::QueueRenderable( IClientRenderable *pRenderable, bo
 	return true;
 }
 
-void CSmokeTranslucentOrder::DrawQueued( bool bShadowDepth )
+void CSmokeTranslucentOrder::DrawRenderable( IClientRenderable *pRenderable, bool bTwoPass, bool bShadowDepth )
+{
+	bool bProtectSmoke = m_nSmokes > 0 && !bShadowDepth &&
+		( pRenderable->UsesPowerOfTwoFrameBufferTexture() || pRenderable->UsesFullFrameBufferTexture() );
+
+	if ( bProtectSmoke )
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->OverrideDepthEnable( true, false );
+	}
+
+	DrawTranslucentRenderable( pRenderable, bTwoPass, bShadowDepth, false );
+
+	if ( bProtectSmoke )
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->OverrideDepthEnable( false, true );
+	}
+}
+
+void CSmokeTranslucentOrder::DrawQueued( bool bShadowDepth, bool bRenderingWaterRenderTargets )
 {
 	for ( int i = 0; i < m_nSmokes; i++ )
 	{
@@ -4338,7 +4355,19 @@ void CSmokeTranslucentOrder::DrawQueued( bool bShadowDepth )
 	// already sorted back to front
 	for ( int i = 0; i < m_nFront; i++ )
 	{
-		DrawTranslucentRenderable( m_Front[i].m_pRenderable, m_Front[i].m_bTwoPass, bShadowDepth, false );
+		IClientRenderable *pRenderable = m_Front[i].m_pRenderable;
+		bool bUsesPowerOfTwoFB = pRenderable->UsesPowerOfTwoFrameBufferTexture();
+		bool bUsesFullFB = pRenderable->UsesFullFrameBufferTexture();
+		if ( ( bUsesPowerOfTwoFB || bUsesFullFB ) && !bShadowDepth )
+		{
+			if ( bRenderingWaterRenderTargets )
+				continue;
+			if ( bUsesPowerOfTwoFB )
+				UpdateRefractTexture();
+			if ( bUsesFullFB )
+				UpdateScreenEffectTexture();
+		}
+		DrawTranslucentRenderable( pRenderable, m_Front[i].m_bTwoPass, bShadowDepth, false );
 	}
 
 	m_nSmokes = 0;
@@ -4386,11 +4415,11 @@ void CRendering3dView::DrawTranslucentRenderablesNoWorld( bool bInSkybox )
 			UpdateScreenEffectTexture();
 		}
 
-		DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass != 0, bShadowDepth, false );
+		smokeOrder.DrawRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass != 0, bShadowDepth );
 		--iCurTranslucentEntity;
 	}
 
-	smokeOrder.DrawQueued( bShadowDepth );
+	smokeOrder.DrawQueued( bShadowDepth, ( m_DrawFlags & ( DF_RENDER_REFRACTION | DF_RENDER_REFLECTION ) ) != 0 );
 
 	// Reset the blend state.
 	render->SetBlend( 1 );
@@ -4615,7 +4644,7 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 					}
 
 					// Then draw the translucent renderable
-					DrawTranslucentRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth, false );
+					smokeOrder.DrawRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth );
 				}
 
 				// Draw all remaining props in this leaf
@@ -4669,7 +4698,7 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 						pRenderContext.SafeRelease();
 					}
 
-					DrawTranslucentRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth, false );
+					smokeOrder.DrawRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth );
 				}
 			}
 
@@ -4684,7 +4713,7 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 	DetailObjectSystem()->RenderTranslucentDetailObjects( CurrentViewOrigin(), CurrentViewForward(), CurrentViewRight(), CurrentViewUp(), nDetailLeafCount, pDetailLeafList );
 
 	// Smoke grenades and the translucents in front of them
-	smokeOrder.DrawQueued( bShadowDepth );
+	smokeOrder.DrawQueued( bShadowDepth, ( m_DrawFlags & ( DF_RENDER_REFRACTION | DF_RENDER_REFLECTION ) ) != 0 );
 
 	// Reset the blend state.
 	render->SetBlend( 1 );

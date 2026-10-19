@@ -41,35 +41,48 @@ const float kTeamScoreMargin = 0.15f;			// margin as a ratio of avatar height
 const float kTeamScoreLineLeadingRatio = 0.25f;	// padding as a ratio of avatar height
 
 // CT player data colors
-// ClientMod detection: real ClientMod clients put a marker into friendsID/friendsName
-// (player_info_t), which the server relays to every client via the userinfo string table.
 ConVar cl_scoreboard_show_clientmod( "cl_scoreboard_show_clientmod", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Show CM in the CLIENT (ex-CLAN) scoreboard column for ClientMod players" );
+
+static bool HasClientModMarker( const player_info_t &pi )
+{
+	return !pi.fakeplayer && !pi.ishltv && (unsigned char)pi.friendsName[0] == 0x08;
+}
 
 static bool IsClientModPlayer( int playerIndex )
 {
 	player_info_t pi;
-	if ( !engine->GetPlayerInfo( playerIndex, &pi ) )
-		return false;
-	if ( pi.fakeplayer || pi.ishltv )
-		return false;
-	return pi.friendsID != 0 && (unsigned char)pi.friendsName[0] == 0x08;
+	return engine->GetPlayerInfo( playerIndex, &pi ) && HasClientModMarker( pi );
 }
 
-CON_COMMAND( cl_clientmod_list, "List players and their client type (ClientMod / Original)" )
+CON_COMMAND( cl_clientmod_list, "List ClientMod markers; use cl_clientmod_list 1 for diagnostics. Unknown does not mean Original." )
 {
+	const bool diagnostics = args.ArgC() == 2 && Q_strcmp( args[1], "1" ) == 0;
+	if ( args.ArgC() > 1 && !diagnostics )
+	{
+		Msg( "Usage: cl_clientmod_list [1]\n" );
+		return;
+	}
+
 	int cm = 0, total = 0;
 	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
 	{
 		player_info_t pi;
 		if ( !engine->GetPlayerInfo( i, &pi ) || pi.fakeplayer || pi.ishltv )
 			continue;
-		bool bCM = IsClientModPlayer( i );
+		const bool bCM = HasClientModMarker( pi );
 		total++;
 		if ( bCM )
 			cm++;
-		Msg( "%2d  %-10s %s\n", i, bCM ? "ClientMod" : "Original", pi.name );
+		Msg( "%2d  %-10s %.*s\n", i, bCM ? "ClientMod" : "Unknown", (int)sizeof(pi.name), pi.name );
+		if ( diagnostics )
+		{
+			Msg( "    userid=%d friendsID=%u friendsName[0..7]=", pi.userID, (unsigned int)pi.friendsID );
+			for ( int j = 0; j < 8; j++ )
+				Msg( "%02X%s", (unsigned int)(unsigned char)pi.friendsName[j], j == 7 ? "\n" : " " );
+		}
 	}
-	Msg( "ClientMod: %d / %d\n", cm, total );
+	Msg( "ClientMod markers: %d / %d; Unknown: %d\n", cm, total, total - cm );
+	Msg( "No marker does not identify the client. Markers are not authentication.\n" );
 }
 
 ConVar cl_scoreboard_ct_color_red( "cl_scoreboard_ct_color_red", "150", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data red channel", true, 0.0f, true, 255.0f );

@@ -467,6 +467,9 @@ bool RecvTable_Decode(
 	bool updateDTI
 	)
 {
+	if ( pIn->IsOverflowed() )
+		return false;
+
 	CRecvDecoder *pDecoder = pTable->m_pDecoder;
 	ErrorIfNot( pDecoder,
 		("RecvTable_Decode: table '%s' missing a decoder.", pTable->GetName())
@@ -479,8 +482,15 @@ bool RecvTable_Decode(
 	int iStartBit = 0, nIndexBits = 0, iLastBit = pIn->GetNumBitsRead();
 	unsigned int iProp;
 	CDeltaBitsReader deltaBitsReader( pIn );
-	while (-1 != (iProp = deltaBitsReader.ReadNextPropIndex()))
+	while ( (unsigned int)-1 != (iProp = deltaBitsReader.ReadNextPropIndex()) )
 	{
+		if ( pIn->IsOverflowed() || iProp >= (unsigned int)pDecoder->GetNumProps() )
+		{
+			pIn->SetOverflowFlag();
+			deltaBitsReader.ForceFinished();
+			return false;
+		}
+
 		theStack.SeekToProp( iProp );
 		
 		const RecvProp *pProp = pDecoder->GetProp( iProp );
@@ -512,6 +522,11 @@ bool RecvTable_Decode(
 		decodeInfo.m_ObjectID = objectID;
 
 		g_PropTypeFns[ decodeInfo.m_pProp->GetType() ].Decode( &decodeInfo );
+		if ( pIn->IsOverflowed() )
+		{
+			deltaBitsReader.ForceFinished();
+			return false;
+		}
 		++g_nPropsDecoded;
 
 		// Instrumentation (store # bits for the encoded property).

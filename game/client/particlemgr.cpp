@@ -790,6 +790,15 @@ int CParticleEffectBinding::DrawMaterialParticles(
 	bool bWireframe
 	 )
 {
+	bool bRefractive = !bWireframe && pMaterial->m_pGroup->m_pPageMaterial &&
+		( pMaterial->m_pGroup->m_pPageMaterial->NeedsPowerOfTwoFrameBufferTexture() ||
+		  pMaterial->m_pGroup->m_pPageMaterial->NeedsFullFrameBufferTexture() );
+	if ( bRefractive )
+	{
+		CMatRenderContextPtr pRenderContext( m_pParticleMgr->m_pMaterialSystem );
+		pRenderContext->OverrideDepthEnable( true, false );
+	}
+
 	// Setup everything.
 	CMeshBuilder builder;
 	ParticleDraw particleDraw;
@@ -820,6 +829,11 @@ int CParticleEffectBinding::DrawMaterialParticles(
 	// Flush out any remaining particles.
 	builder.End( false, true );
 	
+	if ( bRefractive )
+	{
+		CMatRenderContextPtr pRenderContext( m_pParticleMgr->m_pMaterialSystem );
+		pRenderContext->OverrideDepthEnable( false, true );
+	}
 	return m_nActiveParticles;
 }
 
