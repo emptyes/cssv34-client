@@ -6,7 +6,23 @@ permissions:
   contents: write
 
 jobs:
+  test-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install test dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ libbz2-dev
+    - name: Test split packet reassembly
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: python3 tests/network/run_split_packet_tests.py --sanitize
+
   build-windows-amd64:
+    needs: test-network
     runs-on: windows-latest
     timeout-minutes: 300
 
@@ -59,9 +75,12 @@ jobs:
         Build-Lib 'speex' $ssrc @('/DHAVE_CONFIG_H', "/I$s\win32", "/I$s\include", "/I$s\libspeex")
 
     - name: Build windows-amd64 (release)
+      shell: pwsh
       run: |
         python waf configure -T release --enable-lto --enable-speex --enable-opus --build-games=cstrike --prefix=./win64_build
+        if ($LASTEXITCODE -ne 0) { throw "waf configure failed" }
         python waf install
+        if ($LASTEXITCODE -ne 0) { throw "waf install failed" }
 
     - name: Pack game and debug symbols
       shell: pwsh
@@ -71,7 +90,9 @@ jobs:
         Get-ChildItem build -Recurse -Filter *.pdb | Where-Object { $names -contains $_.BaseName } | ForEach-Object { Copy-Item $_.FullName pdb\ -Force }
         Get-ChildItem pdb | Format-Table Name, Length
         7z a -mx9 cssv34_win64_pdb.7z .\pdb\*
+        if ($LASTEXITCODE -ne 0) { throw "7z pdb failed" }
         7z a -tzip cssv34_win64_optimized.zip .\win64_build\*
+        if ($LASTEXITCODE -ne 0) { throw "7z game failed" }
 
     - name: Publish release
       uses: softprops/action-gh-release@v2
