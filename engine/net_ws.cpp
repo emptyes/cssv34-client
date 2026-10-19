@@ -27,7 +27,7 @@ static ConVar net_showudp_wire( "net_showudp_wire", "0", 0, "Show incoming packe
 static ConVar net_udp_rcvbuf( "net_udp_rcvbuf", NETSTRING( UDP_SO_RCVBUF_SIZE ), FCVAR_ALLOWED_IN_COMPETITIVE, "Default UDP receive buffer size", true, 8192, true, 1024 * 1024 );
 
 static ConVar net_showsplits( "net_showsplits", "0", 0, "Show info about packet splits" );
-static ConVar net_compresssplits("net_compresssplits", "1", 0, "Compress splitpacket parts before sending");
+static ConVar net_compresssplits("net_compresssplits", "0", 0, "Compress splitpacket parts before sending");
 
 static ConVar net_splitrate( "net_splitrate", "1", 0, "Number of fragments for a splitpacket that can be sent per frame" );
 
@@ -128,7 +128,7 @@ typedef struct
 	int		currentSequence;
 	int		splitCount;
 	int		totalSize;
-	int		nExpectedSplitSize;
+	int		packetCount;
 	char	buffer[ NET_MAX_MESSAGE ];	// This has to be big enough to hold the largest message
 } LONGPACKET;
 
@@ -152,11 +152,11 @@ typedef struct
 #define MAX_USER_MAXROUTABLE_SIZE	MAX_ROUTABLE_PAYLOAD
 
 
-#define MAX_SPLIT_SIZE	(MAX_USER_MAXROUTABLE_SIZE - sizeof( SPLITPACKET ))
-#define MIN_SPLIT_SIZE	(MIN_USER_MAXROUTABLE_SIZE - sizeof( SPLITPACKET ))
+#define MAX_SPLIT_SIZE	(MAX_USER_MAXROUTABLE_SIZE - (int)sizeof( SPLITPACKET ))
+#define MIN_SPLIT_SIZE	(MIN_USER_MAXROUTABLE_SIZE - (int)sizeof( SPLITPACKET ))
 
 #define MAX_ROUTABLE_PACKET		1400
-#define SPLIT_SIZE		(MAX_ROUTABLE_PACKET - sizeof(SPLITPACKET)) // 1390
+#define SPLIT_SIZE		(MAX_ROUTABLE_PACKET - (int)sizeof(SPLITPACKET)) // 1390
 
 // For metering out splitpackets, don't do them too fast as remote UDP socket will drop some payloads causing them to always fail to be reconstituted
 // This problem is largely solved by increasing the buffer sizes for UDP sockets on Windows
@@ -1140,7 +1140,7 @@ public:
 		int i;
 		for ( i = 0; i < MAX_SPLITPACKET_SPLITS; i++ )
 		{
-			splitflags[ i ] = -1;
+			splitflags[ i ] = 0;
 		}
 
 		memset( &netsplit, 0, sizeof( netsplit ) );
@@ -1155,68 +1155,54 @@ public:
 	float			lastactivetime;
 };
 
-typedef CUtlVector< CSplitPacketEntry > vecSplitPacketEntries_t;
+typedef CUtlVector< CSplitPacketEntry* > vecSplitPacketEntries_t;
 static CUtlVector<vecSplitPacketEntries_t> net_splitpackets;
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void NET_DiscardStaleSplitpackets( const int sock )
+static void NET_RemoveSplitPacketEntry( vecSplitPacketEntries_t &entries, int index )
 {
-	vecSplitPacketEntries_t &splitPacketEntries = net_splitpackets[sock];
-	int i;
-	for ( i = splitPacketEntries.Count() - 1; i >= 0; i-- )
-	{
-		CSplitPacketEntry *entry = &splitPacketEntries[ i ];
-		Assert( entry );
-
-		if ( net_time < ( entry->lastactivetime + SPLIT_PACKET_STALE_TIME ) )
-			continue;
-
-		splitPacketEntries.Remove( i );
-	}
-
-	if ( splitPacketEntries.Count() > SPLIT_PACKET_TRACKING_MAX )
-	{
-		while ( splitPacketEntries.Count() > SPLIT_PACKET_TRACKING_MAX )
-		{
-			CSplitPacketEntry *entry = &splitPacketEntries[ i ];
-			if ( net_time != entry->lastactivetime )
-				splitPacketEntries.Remove(0); // we add to tail each time, so head is the oldest entry, kill them first
-		}
-	}
+	delete entries[index];
+	entries.Remove( index );
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *from - 
-// Output : CSplitPacketEntry
-//-----------------------------------------------------------------------------
+static void NET_ClearSplitPackets()
+{
+	for ( int sock = 0; sock < net_splitpackets.Count(); ++sock )
+		net_splitpackets[sock].PurgeAndDeleteElements();
+}
+
+void NET_DiscardStaleSplitpackets( const int sock )
+{
+	vecSplitPacketEntries_t &entries = net_splitpackets[sock];
+	for ( int i = entries.Count() - 1; i >= 0; --i )
+	{
+		if ( net_time < entries[i]->lastactivetime + SPLIT_PACKET_STALE_TIME )
+			continue;
+
+		NET_RemoveSplitPacketEntry( entries, i );
+	}
+
+	while ( entries.Count() > SPLIT_PACKET_TRACKING_MAX )
+		NET_RemoveSplitPacketEntry( entries, 0 );
+}
+
 CSplitPacketEntry *NET_FindOrCreateSplitPacketEntry( const int sock, netadr_t *from )
 {
-	vecSplitPacketEntries_t &splitPacketEntries = net_splitpackets[sock];
-	int i, count = splitPacketEntries.Count();
-	CSplitPacketEntry *entry = NULL;
-	for ( i = 0; i < count; i++ )
+	vecSplitPacketEntries_t &entries = net_splitpackets[sock];
+	for ( int i = 0; i < entries.Count(); ++i )
 	{
-		entry = &splitPacketEntries[ i ];
-		Assert( entry );
-
-		if ( from->CompareAdr(entry->from) )
-			break;
+		if ( from->CompareAdr( entries[i]->from ) )
+			return entries[i];
 	}
 
-	if ( i >= count )
-	{
-		CSplitPacketEntry newentry;
-		newentry.from = *from;
+	while ( entries.Count() >= SPLIT_PACKET_TRACKING_MAX )
+		NET_RemoveSplitPacketEntry( entries, 0 );
 
-		splitPacketEntries.AddToTail( newentry );
-
-		entry = &splitPacketEntries[ splitPacketEntries.Count() - 1 ];
-	}
-
-	Assert( entry );
+	CSplitPacketEntry *entry = new CSplitPacketEntry;
+	entry->from = *from;
+	entries.AddToTail( entry );
 	return entry;
 }
 
@@ -1256,13 +1242,30 @@ static char const *DescribeSocket( int sock )
 //-----------------------------------------------------------------------------
 bool NET_GetLong(const int sock, netpacket_t* packet)
 {
-	int				packetNumber, packetCount, sequenceNumber, offset;
-	short			packetID;
-	SPLITPACKET* pHeader;
-
-	if (packet->size < sizeof(SPLITPACKET))
+	if (packet->size <= (int)sizeof(SPLITPACKET) ||
+		packet->size > MAX_ROUTABLE_PACKET)
 	{
 		NET_Error("Invalid split packet length %i\n", packet->size);
+		return false;
+	}
+
+	const SPLITPACKET* pHeader = (const SPLITPACKET*)packet->data;
+	int sequenceNumber = LittleLong(pHeader->sequenceNumber);
+	unsigned short packetID = (unsigned short)LittleShort(pHeader->packetID);
+	int packetNumber = packetID >> 8;
+	int packetCount = packetID & 0xff;
+	int size = packet->size - (int)sizeof(SPLITPACKET);
+	int offset = SPLIT_SIZE * packetNumber;
+
+	if (packetCount == 0 || packetNumber >= packetCount ||
+		packetNumber >= MAX_SPLITPACKET_SPLITS ||
+		packetCount > MAX_SPLITPACKET_SPLITS ||
+		(packetCount - 1) * SPLIT_SIZE >= NET_MAX_MESSAGE ||
+		offset + size > NET_MAX_MESSAGE ||
+		(packetNumber < packetCount - 1 && size != SPLIT_SIZE))
+	{
+		NET_Error("Invalid split packet %i/%i, size %i from %s\n",
+			packetNumber, packetCount, size, packet->from.ToString());
 		return false;
 	}
 
@@ -1274,127 +1277,95 @@ bool NET_GetLong(const int sock, netpacket_t* packet)
 	entry->lastactivetime = net_time;
 	Assert(packet->from.CompareAdr(entry->from));
 
-	pHeader = (SPLITPACKET*)packet->data;
-	// pHeader is network endian correct
-	sequenceNumber = LittleLong(pHeader->sequenceNumber);
-	packetID = LittleShort(pHeader->packetID);
-	// High byte is packet number
-	packetNumber = (packetID >> 8);
-	// Low byte is number of total packets
-	packetCount = (packetID & 0xff);
-
-	if (packetNumber >= MAX_SPLITPACKET_SPLITS ||
-		packetCount > MAX_SPLITPACKET_SPLITS)
-	{
-		NET_Error("NET_GetLong:  Split packet from %s with too many split parts (number %i/ count %i) where %i is max count allowed\n",
-			packet->from.ToString(),
-			packetNumber,
-			packetCount,
-			MAX_SPLITPACKET_SPLITS);
-		return false;
-	}
-
-	// First packet in split series?
-	if (entry->netsplit.currentSequence == -1 ||
+	if (entry->netsplit.packetCount == 0 ||
 		sequenceNumber != entry->netsplit.currentSequence)
 	{
 		entry->netsplit.currentSequence = sequenceNumber;
 		entry->netsplit.splitCount = packetCount;
+		entry->netsplit.packetCount = packetCount;
+		entry->netsplit.totalSize = 0;
+		memset(entry->splitflags, 0, sizeof(entry->splitflags));
 	}
-
-	int size = packet->size - sizeof(SPLITPACKET);
-
-	if (entry->splitflags[packetNumber] != sequenceNumber)
+	else if (packetCount != entry->netsplit.packetCount)
 	{
-		// Last packet in sequence? set size
-		if (packetNumber == (packetCount - 1))
-		{
-			entry->netsplit.totalSize = size + SPLIT_SIZE * packetCount - SPLIT_SIZE;
-		}
-
-		entry->netsplit.splitCount--;		// Count packet
-		entry->splitflags[packetNumber] = sequenceNumber;
-
-		if (net_showsplits.GetInt() && net_showsplits.GetInt() != 3)
-		{
-			NET_Complete("<-- Split packet %i of %i, seq %i, size %i from %s\n",
-				packetNumber + 1,
-				packetCount,
-				sequenceNumber,
-				size,
-				packet->from.ToString());
-		}
+		NET_Error("Inconsistent split packet count from %s\n", packet->from.ToString());
+		return false;
 	}
-	else
+
+	if (entry->splitflags[packetNumber])
 	{
-		NET_Warning("NET_GetLong:  Ignoring duplicated split packet %i of %i ( %i bytes ) from %s\n", packetNumber + 1, packetCount, size, packet->from.ToString());
+		NET_Warning("NET_GetLong:  Ignoring duplicated split packet %i of %i ( %i bytes ) from %s\n",
+			packetNumber + 1, packetCount, size, packet->from.ToString());
+		return false;
 	}
 
-
-	// Copy the incoming data to the appropriate place in the buffer
-	offset = SPLIT_SIZE * packetNumber;
 	memcpy(entry->netsplit.buffer + offset, packet->data + sizeof(SPLITPACKET), size);
+	entry->splitflags[packetNumber] = 1;
+	entry->netsplit.splitCount--;
 
-	// Have we received all of the pieces to the packet?
-	if (entry->netsplit.splitCount <= 0)
+	if (packetNumber == packetCount - 1)
+		entry->netsplit.totalSize = offset + size;
+
+	if (net_showsplits.GetInt() && net_showsplits.GetInt() != 3)
 	{
-		int sequence = entry->netsplit.currentSequence;
-
-		entry->netsplit.currentSequence = -1;	// Clear packet
-		if (entry->netsplit.totalSize > sizeof(entry->netsplit.buffer))
-		{
-			NET_Error("Split packet too large! %d bytes from %s\n", entry->netsplit.totalSize, packet->from.ToString());
-			return false;
-		}
-
-		if (sequence >= 0)
-		{
-			Q_memcpy(packet->data, entry->netsplit.buffer, entry->netsplit.totalSize);
-			packet->size = entry->netsplit.totalSize;
-			return true;
-		}
-		else
-		{
-			SPLITPACKET_COMPRESSED* pCompressedHeader = (SPLITPACKET_COMPRESSED*)entry->netsplit.buffer;
-			int decompressedSize = pCompressedHeader->decompressedSize;
-			int expectedCRC = pCompressedHeader->crc;
-
-			if (decompressedSize <= 0 || decompressedSize > NET_MAX_PAYLOAD)
-			{
-				NET_Error("Bad decompressed split packet size %d from %s\n", decompressedSize, packet->from.ToString());
-				return false;
-			}
-
-			// packet->data is a NET_MAX_MESSAGE scratch buffer, distinct from netsplit.buffer
-			char* decompressBuffer = (char*)packet->data;
-
-			unsigned int destLen = NET_MAX_MESSAGE;
-			int result = BZ2_bzBuffToBuffDecompress(
-				decompressBuffer,
-				&destLen,
-				entry->netsplit.buffer + sizeof(SPLITPACKET_COMPRESSED),
-				entry->netsplit.totalSize - sizeof(SPLITPACKET_COMPRESSED),
-				0, 0);
-
-			if (result != BZ_OK || destLen != decompressedSize)
-			{
-				NET_Error("Error decompressing split packet %d bytes from %s (%i)\n", entry->netsplit.totalSize, packet->from.ToString(), result);
-				return false;
-			}
-
-			if (CRC32_ProcessSingleBuffer(decompressBuffer, decompressedSize) != expectedCRC)
-			{
-				NET_Error("Error decompressing split packet %d bytes from %s, crc's don't match\n", entry->netsplit.totalSize, packet->from.ToString());
-				return false;
-			}
-
-			packet->size = decompressedSize;
-
-			return true;
-		}
+		NET_Complete("<-- Split packet %i of %i, seq %i, size %i from %s\n",
+			packetNumber + 1, packetCount, sequenceNumber, size, packet->from.ToString());
 	}
 
-	return false;
+	if (entry->netsplit.splitCount != 0)
+		return false;
+
+	entry->netsplit.packetCount = 0;
+	int totalSize = entry->netsplit.totalSize;
+	if (totalSize < NET_MIN_MESSAGE || totalSize > (int)sizeof(entry->netsplit.buffer))
+	{
+		NET_Error("Invalid reassembled split packet size %i from %s\n", totalSize, packet->from.ToString());
+		return false;
+	}
+
+	if (sequenceNumber >= 0)
+	{
+		Q_memcpy(packet->data, entry->netsplit.buffer, totalSize);
+		packet->size = totalSize;
+		return true;
+	}
+
+	if (totalSize <= (int)sizeof(SPLITPACKET_COMPRESSED))
+		return false;
+
+	const SPLITPACKET_COMPRESSED* pCompressedHeader = (const SPLITPACKET_COMPRESSED*)entry->netsplit.buffer;
+	int decompressedSize = LittleLong(pCompressedHeader->decompressedSize);
+	CRC32_t expectedCRC = (CRC32_t)LittleLong(pCompressedHeader->crc);
+
+	if (decompressedSize < NET_MIN_MESSAGE || decompressedSize > NET_MAX_PAYLOAD)
+	{
+		NET_Error("Bad decompressed split packet size %d from %s\n", decompressedSize, packet->from.ToString());
+		return false;
+	}
+
+	char* decompressBuffer = (char*)packet->data;
+	unsigned int destLen = decompressedSize;
+	int result = BZ2_bzBuffToBuffDecompress(
+		decompressBuffer,
+		&destLen,
+		entry->netsplit.buffer + sizeof(SPLITPACKET_COMPRESSED),
+		totalSize - (int)sizeof(SPLITPACKET_COMPRESSED),
+		0, 0);
+
+	if (result != BZ_OK || destLen != (unsigned int)decompressedSize)
+	{
+		NET_Error("Error decompressing split packet %d bytes from %s (%i)\n", totalSize, packet->from.ToString(), result);
+		return false;
+	}
+
+	if (CRC32_ProcessSingleBuffer(decompressBuffer, decompressedSize) != expectedCRC)
+	{
+		NET_Error("Error decompressing split packet %d bytes from %s, crc's don't match\n", totalSize, packet->from.ToString());
+		return false;
+	}
+
+	packet->size = decompressedSize;
+	return true;
 }
 
 bool NET_GetLoopPacket ( netpacket_t * packet )
@@ -1436,6 +1407,35 @@ bool NET_GetLoopPacket ( netpacket_t * packet )
 
 	// allow lag system to modify packet
 	return ( NET_LagPacket( true, packet ) );	
+}
+
+static bool NET_DecompressPacket( netpacket_t *packet )
+{
+	if ( packet->size <= (int)sizeof( unsigned int ) || packet->size > NET_MAX_MESSAGE )
+		return false;
+
+	const char *compressed = (const char *)packet->data + sizeof( unsigned int );
+	unsigned int compressedSize = packet->size - (int)sizeof( unsigned int );
+	int actualSize = COM_GetUncompressedSize( compressed, compressedSize );
+	if ( actualSize < NET_MIN_MESSAGE || actualSize > NET_MAX_PAYLOAD )
+		return false;
+
+	MEM_ALLOC_CREDIT();
+	CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > output( NET_COMPRESSION_STACKBUF_SIZE );
+	output.EnsureCapacity( actualSize );
+	unsigned int outputSize = actualSize;
+	bool decompressed = COM_BufferToBufferDecompress( output.Base(), &outputSize, compressed, compressedSize );
+	if ( !decompressed || outputSize != (unsigned int)actualSize )
+	{
+		if ( net_showudp.GetBool() )
+			NET_Error( "UDP: discarding compressed packet from %s (success %i, size %u/%i)\n",
+				packet->from.ToString(), decompressed, outputSize, actualSize );
+		return false;
+	}
+
+	Q_memcpy( packet->data, output.Base(), outputSize );
+	packet->size = outputSize;
+	return true;
 }
 
 bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
@@ -1531,34 +1531,8 @@ bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
 			// Next check for compressed message
 			if ( LittleLong( *(int *)packet->data) == NET_HEADER_FLAG_COMPRESSEDPACKET )
 			{
-				char *pCompressedData = (char*)packet->data + sizeof( unsigned int );
-				unsigned nCompressedDataSize = packet->wiresize - sizeof( unsigned int );
-
-				// Decompress
-				int actualSize = COM_GetUncompressedSize( pCompressedData, nCompressedDataSize );
-				if ( actualSize <= 0 || actualSize > NET_MAX_PAYLOAD )
+				if ( !NET_DecompressPacket( packet ) )
 					return false;
-
-				MEM_ALLOC_CREDIT();
-				CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > memDecompressed( NET_COMPRESSION_STACKBUF_SIZE );
-				memDecompressed.EnsureCapacity( actualSize );
-
-				unsigned uDecompressedSize = (unsigned)actualSize;
-				COM_BufferToBufferDecompress( (char*)memDecompressed.Base(), &uDecompressedSize, pCompressedData, nCompressedDataSize );
-				if ( uDecompressedSize == 0 || ((unsigned int)actualSize) != uDecompressedSize )
-				{
-					if ( net_showudp.GetBool() )
-					{
-						NET_Error( "UDP:  discarding %d bytes from %s due to decompression error [%d decomp, actual %d] at tm=%f rt=%f\n", ret, packet->from.ToString(), uDecompressedSize, actualSize, 
-							(float)net_time, (float)Plat_FloatTime() );
-					}
-					return false;
-				}
-
-				// packet->wiresize is already set
-				Q_memcpy( packet->data, memDecompressed.Base(), uDecompressedSize );
-
-				packet->size = uDecompressedSize;
 			}
 
 			if ( nVoiceBits > 0 )
@@ -2569,6 +2543,8 @@ NET_CloseAllSockets
 */
 void NET_CloseAllSockets (void)
 {
+	NET_ClearSplitPackets();
+
 	// shut down any existing and open sockets
 	for (int i=0 ; i<net_sockets.Count() ; i++)
 	{
@@ -2769,6 +2745,7 @@ void NET_RemoveAllExtraSockets()
 {
 	for (int i=MAX_SOCKETS ; i<net_sockets.Count() ; i++)
 	{
+		net_splitpackets[i].PurgeAndDeleteElements();
 		if ( net_sockets[i].nPort )
 		{
 			NET_CloseSocket( net_sockets[i].hUDP );
@@ -3228,6 +3205,7 @@ void NET_SetMutiplayer(bool multiplayer)
 //-----------------------------------------------------------------------------
 void NET_Init( bool bIsDedicated )
 {
+	NET_ClearSplitPackets();
 
 	if ( CommandLine()->FindParm( "-NoQueuedPacketThread" ) )
 		Warning( "Found -NoQueuedPacketThread, so no queued packet thread will be created.\n" );
