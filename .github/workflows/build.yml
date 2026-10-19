@@ -1,9 +1,12 @@
 name: Build
 
-on: [push, workflow_dispatch]
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test-network:
@@ -37,8 +40,29 @@ jobs:
         python3 tests/entities/run_entity_decode_tests.py --sanitize
         python3 tests/entities/run_entity_decode_tests.py --sanitize --debug
 
+    - name: Test server browser layout and history
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: |
+        python3 tests/serverbrowser/run_layout_tests.py --sanitize
+        python3 tests/serverbrowser/run_history_tests.py --sanitize
+    - name: Test smoke, water and ClientMod markers
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: |
+        python3 tests/rendering/run_smoke_water_tests.py --sanitize
+        python3 tests/clientmod/run_clientmod_tests.py --sanitize
+    - name: Test streamed writes and MP3 decoder lifetime
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: |
+        python3 tests/streambuffer/run_streambuffer_tests.py --sanitize
+        python3 tests/audio/run_audio_tests.py --sanitize
+
   build-windows-amd64:
     needs: test-network
+    permissions:
+      contents: write
     runs-on: windows-latest
     timeout-minutes: 300
 
@@ -111,10 +135,13 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "7z game failed" }
 
     - name: Publish release
+      if: github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: build-${{ github.run_number }}
         name: Build ${{ github.run_number }}
+        target_commitish: ${{ github.sha }}
+        fail_on_unmatched_files: true
         files: |
           cssv34_win64_optimized.zip
           cssv34_win64_pdb.7z
