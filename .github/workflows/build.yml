@@ -64,6 +64,11 @@ jobs:
         ASAN_OPTIONS: detect_leaks=1
       run: python3 tests/demo/run_demo_trace_tests.py --sanitize
 
+    - name: Test demo camera interpolation
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: python3 tests/demo/run_demo_camera_tests.py --sanitize
+
   build-windows-amd64:
     needs: test-network
     permissions:
