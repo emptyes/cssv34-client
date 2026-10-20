@@ -74,6 +74,11 @@ jobs:
         ASAN_OPTIONS: detect_leaks=1
       run: python3 tests/queries/run_query_tests.py --sanitize
 
+    - name: Test v34 compatible demo string table recording
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+      run: python3 tests/demo/run_demo_recording_tests.py --sanitize
+
   build-windows-amd64:
     needs: test-network
     permissions:
