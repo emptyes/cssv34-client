@@ -945,6 +945,7 @@ public:
 
 private:
 	void *Align( const void *pAddr );
+	int CalcExternalAllocationCount( const T *pMemory, int numElements ) const;
 };
 
 
@@ -982,13 +983,25 @@ CUtlMemoryAligned<T, nAlignment>::CUtlMemoryAligned( int nGrowSize, int nInitAll
 }
 
 template< class T, int nAlignment >
+int CUtlMemoryAligned<T, nAlignment>::CalcExternalAllocationCount( const T *pMemory, int numElements ) const
+{
+	Assert( numElements >= 0 );
+	if ( numElements <= 0 )
+		return 0;
+
+	const size_t nBytes = (size_t)numElements * sizeof(T);
+	const size_t nAlignmentOffset = (size_t)CUtlMemory<T>::m_pMemory - (size_t)pMemory;
+	return nAlignmentOffset < nBytes ? (int)( ( nBytes - nAlignmentOffset ) / sizeof(T) ) : 0;
+}
+
+template< class T, int nAlignment >
 CUtlMemoryAligned<T, nAlignment>::CUtlMemoryAligned( T* pMemory, int numElements )
 {
 	// Special marker indicating externally supplied memory
 	CUtlMemory<T>::m_nGrowSize = CUtlMemory<T>::EXTERNAL_BUFFER_MARKER;
 
 	CUtlMemory<T>::m_pMemory = (T*)Align( pMemory );
-	CUtlMemory<T>::m_nAllocationCount = ( (int)(pMemory + numElements) - (int)CUtlMemory<T>::m_pMemory ) / sizeof(T);
+	CUtlMemory<T>::m_nAllocationCount = CalcExternalAllocationCount( pMemory, numElements );
 }
 
 template< class T, int nAlignment >
@@ -998,7 +1011,7 @@ CUtlMemoryAligned<T, nAlignment>::CUtlMemoryAligned( const T* pMemory, int numEl
 	CUtlMemory<T>::m_nGrowSize = CUtlMemory<T>::EXTERNAL_CONST_BUFFER_MARKER;
 
 	CUtlMemory<T>::m_pMemory = (T*)Align( pMemory );
-	CUtlMemory<T>::m_nAllocationCount = ( (int)(pMemory + numElements) - (int)CUtlMemory<T>::m_pMemory ) / sizeof(T);
+	CUtlMemory<T>::m_nAllocationCount = CalcExternalAllocationCount( pMemory, numElements );
 }
 
 template< class T, int nAlignment >
@@ -1018,7 +1031,7 @@ void CUtlMemoryAligned<T, nAlignment>::SetExternalBuffer( T* pMemory, int numEle
 	Purge();
 
 	CUtlMemory<T>::m_pMemory = (T*)Align( pMemory );
-	CUtlMemory<T>::m_nAllocationCount = ( (int)(pMemory + numElements) - (int)CUtlMemory<T>::m_pMemory ) / sizeof(T);
+	CUtlMemory<T>::m_nAllocationCount = CalcExternalAllocationCount( pMemory, numElements );
 
 	// Indicate that we don't own the memory
 	CUtlMemory<T>::m_nGrowSize = CUtlMemory<T>::EXTERNAL_BUFFER_MARKER;
@@ -1031,7 +1044,7 @@ void CUtlMemoryAligned<T, nAlignment>::SetExternalBuffer( const T* pMemory, int 
 	Purge();
 
 	CUtlMemory<T>::m_pMemory = (T*)Align( pMemory );
-	CUtlMemory<T>::m_nAllocationCount = ( (int)(pMemory + numElements) - (int)CUtlMemory<T>::m_pMemory ) / sizeof(T);
+	CUtlMemory<T>::m_nAllocationCount = CalcExternalAllocationCount( pMemory, numElements );
 
 	// Indicate that we don't own the memory
 	CUtlMemory<T>::m_nGrowSize = CUtlMemory<T>::EXTERNAL_CONST_BUFFER_MARKER;
