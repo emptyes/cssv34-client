@@ -183,6 +183,7 @@ ConVar	password	( "password", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FC
 ConVar  cl_interpolate( "cl_interpolate", "1", FCVAR_USERINFO /* | FCVAR_DEVELOPMENTONLY | FCVAR_NOT_CONNECTED*/, "Interpolate entities on the client.");
 ConVar  cl_clanid( "cl_clanid", "0", FCVAR_ARCHIVE | FCVAR_USERINFO | FCVAR_HIDDEN, "Current clan ID for name decoration", CL_ClanIdChanged );
 ConVar  cl_show_connectionless_packet_warnings( "cl_show_connectionless_packet_warnings", "0", FCVAR_NONE, "Show console messages about ignored connectionless packets on the client." );
+static ConVar cl_query_trace( "cl_query_trace", "0", FCVAR_NONE, "Log server cvar query responses without variable values." );
 
 // ---------------------------------------------------------------------------------------- //
 // C_ServerClassInfo implementation.
@@ -1815,7 +1816,18 @@ bool CBaseClientState::ProcessGetCvarValue( SVC_GetCvarValue *msg )
 	g_pClientModManager->FillRespondCvarValue(msg, returnMsg);
 
 	// Send back.
-	m_NetChannel->SendNetMsg( returnMsg );
+	const bool queued = m_NetChannel->SendNetMsg( returnMsg );
+	if ( cl_query_trace.GetBool() )
+	{
+		Msg( "Cvar query: cookie=%d name=%s status=%d queued=%d playback=%d\n",
+			returnMsg.m_iCookie, returnMsg.m_szCvarName, static_cast<int>( returnMsg.m_eStatusCode ),
+			queued ? 1 : 0, m_NetChannel->IsPlayback() ? 1 : 0 );
+	}
+	if ( !queued )
+	{
+		Warning( "Failed to queue cvar query response: cookie=%d name=%s\n",
+			returnMsg.m_iCookie, returnMsg.m_szCvarName );
+	}
 	return true;
 }
 
