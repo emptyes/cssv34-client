@@ -78,6 +78,7 @@ public:	// other public functions
 	void	WriteTimeDemoResults( void );
 	bool	ParseAheadForInterval( int curtick, int intervalticks );
 	void	InterpolateDemoCommand( int targettick, DemoCommandQueue& prev, DemoCommandQueue& next );
+	void	StoreDemoCommandInfo( int tick, const democmdinfo_t& info );
 
 protected:
 	bool	OverrideView( democmdinfo_t& info );
@@ -103,6 +104,9 @@ public:
 	// view origin/angle interpolation:
 	CUtlVector< DemoCommandQueue >	m_DestCmdInfo;
 	democmdinfo_t					m_LastCmdInfo;
+	int								m_nLastCmdInfoTick;
+	bool							m_bHasLastCmdInfoTick;
+	bool							m_bLastCmdInfoTickHasFlags;
 	bool							m_bInterpolateView;
 	bool							m_bResetInterpolation;
 
