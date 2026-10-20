@@ -1210,11 +1210,190 @@ void CHLClient::PostInit()
 #endif
 }
 
+class CDemoPlaybackTrace
+{
+public:
+	enum Stage { NetworkUpdate, RenderBefore, RenderAfter, StageCount };
+
+	CDemoPlaybackTrace() : m_File( FILESYSTEM_INVALID_HANDLE ), m_nRows( 0 ), m_nBytes( 0 )
+	{
+		m_Path[0] = 0;
+		for ( int i = 0; i < StageCount; ++i )
+			m_LastTick[i] = -1;
+	}
+
+	bool IsActive() const { return m_File != FILESYSTEM_INVALID_HANDLE; }
+
+	void Stop( const char *reason )
+	{
+		if ( !IsActive() )
+			return;
+		filesystem->Close( m_File );
+		m_File = FILESYSTEM_INVALID_HANDLE;
+		Msg( "Demo trace saved: %s (%d rows; %s).\n", m_Path, m_nRows, reason );
+	}
+
+	void Start()
+	{
+		if ( IsActive() )
+		{
+			Msg( "Demo trace is already recording: %s.\n", m_Path );
+			return;
+		}
+		if ( !engine->IsPlayingDemo() || engine->IsPlayingTimeDemo() )
+		{
+			Msg( "Demo trace requires normal demo playback.\n" );
+			return;
+		}
+		int index;
+		for ( index = 1; index <= 9999; ++index )
+		{
+			Q_snprintf( m_Path, sizeof(m_Path), "demo_trace_%04d.csv", index );
+			if ( !filesystem->FileExists( m_Path, "MOD" ) )
+				break;
+		}
+		if ( index > 9999 )
+		{
+			Warning( "Demo trace: no unused output filename.\n" );
+			return;
+		}
+		m_File = filesystem->Open( m_Path, "wb", "MOD" );
+		if ( !IsActive() )
+		{
+			Warning( "Demo trace: cannot open %s.\n", m_Path );
+			return;
+		}
+		m_nRows = m_nBytes = 0;
+		for ( int i = 0; i < StageCount; ++i )
+			m_LastTick[i] = -1;
+		const char *header = "schema,stage,frame,demo_tick,demo_total,speed,realtime,client_tick,client_time,frame_time,tick_interval,render_fraction,engine_time,server_time,paused,interp,local_index,local_timebase,local_predicted_time,observer_mode,observer_target,camera_x,camera_y,camera_z,camera_pitch,camera_yaw,camera_roll,entity,local,dormant,alive,predictable,simulation_time,network_x,network_y,network_z,origin_x,origin_y,origin_z,abs_x,abs_y,abs_z,render_x,render_y,render_z\n";
+		if ( Write( header, Q_strlen( header ) ) )
+			Msg( "Demo trace recording: %s. Stop with cl_demo_trace 0.\n", m_Path );
+	}
+
+	void Capture( Stage stage )
+	{
+		if ( !IsActive() )
+			return;
+		if ( !engine->IsPlayingDemo() || engine->IsPlayingTimeDemo() )
+		{
+			Stop( "playback ended" );
+			return;
+		}
+		int tick = engine->GetDemoPlaybackTick();
+		if ( m_LastTick[stage] >= 0 && tick >= m_LastTick[stage] && tick - m_LastTick[stage] < 8 )
+			return;
+		C_BasePlayer *local = C_BasePlayer::GetLocalPlayer();
+		if ( !local || !C_BaseEntity::IsAbsQueriesValid() )
+			return;
+		m_LastTick[stage] = tick;
+		C_BaseEntity *target = local->GetObserverTarget();
+		const CViewSetup *camera = view->GetViewSetup();
+		Vector cameraOrigin = camera ? camera->origin : vec3_origin;
+		QAngle cameraAngles = camera ? camera->angles : vec3_angle;
+		const char *stages[] = { "network", "render_before", "render_after" };
+		char batch[16384];
+		int used = 0;
+		for ( int index = 1; index <= MIN( gpGlobals->maxClients, MAX_PLAYERS ); ++index )
+		{
+			C_BasePlayer *player = UTIL_PlayerByIndex( index );
+			if ( !player )
+				continue;
+			if ( m_nRows >= 100000 )
+			{
+				if ( used )
+					Write( batch, used );
+				Stop( "row limit" );
+				return;
+			}
+			const Vector &network = player->GetNetworkOrigin();
+			const Vector &origin = player->GetLocalOrigin();
+			const Vector &absolute = player->GetAbsOrigin();
+			const Vector &render = player->GetRenderOrigin();
+			char row[1024];
+			int length = Q_snprintf( row, sizeof(row),
+				"1,%s,%d,%d,%d,%.6f,%.6f,%d,%.6f,%.6f,%.9f,%.6f,%.6f,%.6f,%d,%.6f,%d,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+				stages[stage], gpGlobals->framecount, tick, engine->GetDemoPlaybackTotalTicks(), engine->GetDemoPlaybackTimeScale(),
+				gpGlobals->realtime, gpGlobals->tickcount, gpGlobals->curtime, gpGlobals->frametime, gpGlobals->interval_per_tick,
+				gpGlobals->interpolation_amount, engine->Time(), engine->GetLastTimeStamp(), engine->IsPaused() ? 1 : 0,
+				GetClientInterpAmount(), local->entindex(), local->GetTimeBase(), local->GetFinalPredictedTime(),
+				local->GetObserverMode(), target ? target->entindex() : 0,
+				cameraOrigin.x, cameraOrigin.y, cameraOrigin.z, cameraAngles.x, cameraAngles.y, cameraAngles.z,
+				index, player == local ? 1 : 0, player->IsDormant() ? 1 : 0, player->IsAlive() ? 1 : 0,
+				player->GetPredictable() ? 1 : 0, player->GetSimulationTime(),
+				network.x, network.y, network.z, origin.x, origin.y, origin.z,
+				absolute.x, absolute.y, absolute.z, render.x, render.y, render.z );
+			if ( length <= 0 || length >= (int)sizeof(row) - 1 )
+			{
+				if ( used )
+					Write( batch, used );
+				Stop( "invalid row length" );
+				return;
+			}
+			if ( used + length > (int)sizeof(batch) )
+			{
+				if ( !Write( batch, used ) )
+					return;
+				used = 0;
+			}
+			Q_memcpy( batch + used, row, length );
+			used += length;
+			++m_nRows;
+		}
+		if ( used )
+			Write( batch, used );
+	}
+
+private:
+	bool Write( const char *data, int length )
+	{
+		if ( length > 64 * 1024 * 1024 - m_nBytes )
+		{
+			Stop( "size limit" );
+			return false;
+		}
+		if ( filesystem->Write( data, length, m_File ) != length )
+		{
+			Warning( "Demo trace: write failed for %s.\n", m_Path );
+			Stop( "write error" );
+			return false;
+		}
+		m_nBytes += length;
+		return true;
+	}
+
+	FileHandle_t m_File;
+	char m_Path[64];
+	int m_LastTick[StageCount];
+	int m_nRows;
+	int m_nBytes;
+};
+
+static CDemoPlaybackTrace g_DemoPlaybackTrace;
+
+static void DemoPlaybackTraceCommand( const CCommand &args )
+{
+	if ( args.ArgC() != 2 || ( Q_strcmp( args[1], "0" ) && Q_strcmp( args[1], "1" ) ) )
+	{
+		Msg( "Usage: cl_demo_trace 1 (start), cl_demo_trace 0 (stop). Status: %s.\n",
+			g_DemoPlaybackTrace.IsActive() ? "recording" : "off" );
+		return;
+	}
+	if ( !Q_strcmp( args[1], "1" ) )
+		g_DemoPlaybackTrace.Start();
+	else
+		g_DemoPlaybackTrace.Stop( "manual stop" );
+}
+
+static ConCommand cl_demo_trace( "cl_demo_trace", DemoPlaybackTraceCommand,
+	"Record local demo playback timing and player positions to a CSV file.", FCVAR_DONTRECORD );
+
 //-----------------------------------------------------------------------------
 // Purpose: Called when the client .dll is being dismissed
 //-----------------------------------------------------------------------------
 void CHLClient::Shutdown( void )
 {
+	g_DemoPlaybackTrace.Stop( "client shutdown" );
     if (g_pAchievementsAndStatsInterface)
     {
         g_pAchievementsAndStatsInterface->ReleasePanel();
@@ -1729,6 +1908,7 @@ void CHLClient::ResetStringTablePointers()
 //-----------------------------------------------------------------------------
 void CHLClient::LevelShutdown( void )
 {
+	g_DemoPlaybackTrace.Stop( "level shutdown" );
 	// HACK: Bogus, but the logic is too complicated in the engine
 	if (!g_bLevelInitialized)
 		return;
@@ -2299,7 +2479,9 @@ void CHLClient::FrameStageNotify( ClientFrameStage_t curStage )
 			VPROF( "CHLClient::FrameStageNotify FRAME_RENDER_START" );
 
 			// Last thing before rendering, run simulation.
+			g_DemoPlaybackTrace.Capture( CDemoPlaybackTrace::RenderBefore );
 			OnRenderStart();
+			g_DemoPlaybackTrace.Capture( CDemoPlaybackTrace::RenderAfter );
 		}
 		break;
 		
@@ -2334,6 +2516,7 @@ void CHLClient::FrameStageNotify( ClientFrameStage_t curStage )
 			partition->SuppressLists( PARTITION_ALL_CLIENT_EDICTS, false );
 
 			PREDICTION_ENDTRACKVALUE();
+			g_DemoPlaybackTrace.Capture( CDemoPlaybackTrace::NetworkUpdate );
 		}
 		break;
 	case FRAME_NET_UPDATE_POSTDATAUPDATE_START:
