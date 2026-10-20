@@ -18,66 +18,11 @@ jobs:
     - name: Install test dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y g++ libbz2-dev
-    - name: Test split packet reassembly
+        sudo apt-get install -y g++ libbz2-dev zlib1g-dev
+    - name: Run regression tests
       env:
         ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/network/run_split_packet_tests.py --sanitize
-    - name: Test bit buffer boundaries and wire encoding
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: |
-        python3 tests/bitbuf/run_bitbuf_tests.py --sanitize
-        python3 tests/bitbuf/run_bitbuf_tests.py --sanitize --debug
-    - name: Test string table message boundaries and updates
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/stringtables/run_stringtable_tests.py --sanitize
-    - name: Test entity property decoding
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: |
-        python3 tests/entities/run_entity_decode_tests.py --sanitize
-        python3 tests/entities/run_entity_decode_tests.py --sanitize --debug
-
-    - name: Test server browser layout and history
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: |
-        python3 tests/serverbrowser/run_layout_tests.py --sanitize
-        python3 tests/serverbrowser/run_history_tests.py --sanitize
-    - name: Test smoke, water and ClientMod markers
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: |
-        python3 tests/rendering/run_smoke_water_tests.py --sanitize
-        python3 tests/clientmod/run_clientmod_tests.py --sanitize
-    - name: Test streamed writes and MP3 decoder lifetime
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: |
-        python3 tests/streambuffer/run_streambuffer_tests.py --sanitize
-        python3 tests/audio/run_audio_tests.py --sanitize
-
-    - name: Test demo playback diagnostics
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/demo/run_demo_trace_tests.py --sanitize
-
-    - name: Test demo camera interpolation
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/demo/run_demo_camera_tests.py --sanitize
-
-    - name: Test server cvar query responses
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/queries/run_query_tests.py --sanitize
-
-    - name: Test v34 compatible demo string table recording
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/demo/run_demo_recording_tests.py --sanitize
+      run: python3 tests/run_all_tests.py --sanitize
 
   build-windows-amd64:
     needs: test-network
