@@ -341,18 +341,26 @@ void CAsyncWaveData::OnAsyncCompleted( const FileAsyncRequest_t *asyncFilePtr, i
 			m_arrival = ( float )Plat_FloatTime();
 
 			// Take over ptr
-			m_pAlloc = ( byte * )asyncFilePtr->pData;
+			m_pAlloc = asyncFilePtr ? ( byte * )asyncFilePtr->pData : NULL;
+			m_pvData = NULL;
+			m_nReadSize = 0;
 			if ( SndAlignReads() )
 			{
-				m_async.nOffset = ( m_async.nBytes - m_nDataSize );
-				m_async.nBytes -= m_async.nOffset;
-				m_pvData = ((byte *)m_pAlloc) + m_async.nOffset;
-				m_nReadSize	= numReadBytes - m_async.nOffset;
+				if ( m_nDataSize > 0 && m_async.nBytes >= m_nDataSize )
+				{
+					m_async.nOffset = m_async.nBytes - m_nDataSize;
+					m_async.nBytes = m_nDataSize;
+					if ( m_pAlloc && numReadBytes > m_async.nOffset )
+					{
+						m_pvData = m_pAlloc + m_async.nOffset;
+						m_nReadSize = MIN( numReadBytes - m_async.nOffset, m_nDataSize );
+					}
+				}
 			}
-			else
+			else if ( m_pAlloc && numReadBytes > 0 && m_nDataSize > 0 )
 			{
 				m_pvData = m_pAlloc;
-				m_nReadSize = numReadBytes;
+				m_nReadSize = MIN( numReadBytes, m_nDataSize );
 			}
 
 			// Needs to be post-processed
@@ -377,6 +385,10 @@ void CAsyncWaveData::OnAsyncCompleted( const FileAsyncRequest_t *asyncFilePtr, i
 
 		// possibly reading more than intended due to alignment restriction
 		m_nReadSize = numReadBytes;
+		if ( m_nReadSize < 0 )
+		{
+			m_nReadSize = 0;
+		}
 		if ( m_nReadSize > m_nDataSize )
 		{
 			// clamp to expected, extra data is unreliable
@@ -407,6 +419,11 @@ void CAsyncWaveData::OnAsyncCompleted( const FileAsyncRequest_t *asyncFilePtr, i
 //-----------------------------------------------------------------------------
 bool CAsyncWaveData::BlockingCopyData( void *destbuffer, int destbufsize, int startoffset, int count )
 {
+	if ( !destbuffer || destbufsize < 0 || count < 0 || count > destbufsize || startoffset < 0 )
+	{
+		return false;
+	}
+
 	if ( !m_bLoaded )
 	{
 		Assert( m_hAsyncControl );
@@ -449,22 +466,25 @@ bool CAsyncWaveData::BlockingCopyData( void *destbuffer, int destbufsize, int st
 		m_arrival = 0;
 	}
 
-	// clamp requested to available
-	if ( count > m_nReadSize )
+	if ( !m_pvData || m_async.nOffset < 0 || startoffset < m_async.nOffset || m_nReadSize < 0 )
 	{
-		count = m_nReadSize - startoffset;
+		return false;
 	}
 
-	if ( count < 0 )
+	int sourceOffset = startoffset - m_async.nOffset;
+	if ( sourceOffset > m_nReadSize || count > m_nReadSize - sourceOffset )
 	{
 		return false;
 	}
 
 	// Copy data from stream buffer
-	Q_memcpy( destbuffer, (char *)m_pvData + ( startoffset - m_async.nOffset ), count );
+	Q_memcpy( destbuffer, (char *)m_pvData + sourceOffset, count );
 
-	g_pFileSystem->AsyncRelease( m_hAsyncControl );
-	m_hAsyncControl = NULL;
+	if ( m_hAsyncControl )
+	{
+		g_pFileSystem->AsyncRelease( m_hAsyncControl );
+		m_hAsyncControl = NULL;
+	}
 	return true;
 }
 
@@ -487,6 +507,11 @@ bool CAsyncWaveData::IsCurrentlyLoading()
 bool CAsyncWaveData::BlockingGetDataPointer( void **ppData )
 {
 	Assert( ppData );
+	if ( !ppData )
+	{
+		return false;
+	}
+	*ppData = NULL;
 	if ( !m_bLoaded )
 	{
 		// Force it to finish
@@ -527,10 +552,18 @@ bool CAsyncWaveData::BlockingGetDataPointer( void **ppData )
 		m_arrival = 0;
 	}
 
+	if ( !m_pvData || m_nDataSize <= 0 || m_nReadSize < m_nDataSize )
+	{
+		return false;
+	}
+
 	*ppData = m_pvData;
 
-	g_pFileSystem->AsyncRelease( m_hAsyncControl );
-	m_hAsyncControl = NULL;
+	if ( m_hAsyncControl )
+	{
+		g_pFileSystem->AsyncRelease( m_hAsyncControl );
+		m_hAsyncControl = NULL;
+	}
 
 	return true;
 }
