@@ -5,6 +5,7 @@
 //=====================================================================================//
 
 #include "audio_pch.h"
+#include "tier2/waveformat.h"
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -50,10 +51,14 @@ private:
 
 CAudioMixerWaveADPCM::CAudioMixerWaveADPCM( IWaveData *data ) : CAudioMixerWave( data ) 
 {
+	m_pFormat = NULL;
+	m_pCoefficients = NULL;
 	m_pSamples = NULL;
 	m_sampleCount = 0;
 	m_samplePosition = 0;
+	m_blockSize = 0;
 	m_offset = 0;
+	m_totalBytes = 0;
 
 	CAudioSourceWave &source = reinterpret_cast<CAudioSourceWave &>(m_pData->Source());
 
@@ -118,18 +123,21 @@ static int error_coefficients_lut[] = { 230, 230, 230, 230, 307, 409, 512, 614,
 //-----------------------------------------------------------------------------
 void CAudioMixerWaveADPCM::DecompressBlockMono( short *pOut, const char *pIn, int count )
 {
-	int pred = *pIn++;
+	int pred = (unsigned char)*pIn++;
 	int co1 = m_pCoefficients[pred].iCoef1;
 	int co2 = m_pCoefficients[pred].iCoef2;
 
 	// read initial delta
-	short data[3];
-	memcpy( data, pIn, sizeof(data) );
-	pIn += sizeof(data);
+	unsigned short deltaValue;
+	short samples[2];
+	memcpy( &deltaValue, pIn, sizeof(deltaValue) );
+	pIn += sizeof(deltaValue);
+	memcpy( samples, pIn, sizeof(samples) );
+	pIn += sizeof(samples);
 
-	int delta = data[0];
-	int samp1 = data[1];
-	int samp2 = data[2];
+	int delta = deltaValue;
+	int samp1 = samples[0];
+	int samp2 = samples[1];
 
 	// write out the initial samples (stored in reverse order)
 	*pOut++ = (short)samp2;
@@ -168,7 +176,7 @@ void CAudioMixerWaveADPCM::DecompressBlockMono( short *pOut, const char *pIn, in
 		int errorSign = error_sign_lut[error];
 
 		// interpolate the new sample
-		int predSample = (samp1 * co1) + (samp2 * co2);
+		long long predSample = (static_cast<long long>( samp1 ) * co1) + (static_cast<long long>( samp2 ) * co2);
 		// coefficients are fixed point 8-bit, so shift back to 16-bit integer
 		predSample >>= 8;
 
@@ -191,7 +199,7 @@ void CAudioMixerWaveADPCM::DecompressBlockMono( short *pOut, const char *pIn, in
 		*pOut++ = (short)predSample;
 		// move samples over
 		samp2 = samp1;
-		samp1 = predSample;
+		samp1 = static_cast<int>( predSample );
 
 		count--;
 	}
@@ -211,27 +219,35 @@ void CAudioMixerWaveADPCM::DecompressBlockStereo( short *pOut, const char *pIn, 
 
 	for ( i = 0; i < 2; i++ )
 	{
-		pred[i] = *pIn++;
+		pred[i] = (unsigned char)*pIn++;
 		co1[i] = m_pCoefficients[pred[i]].iCoef1;
 		co2[i] = m_pCoefficients[pred[i]].iCoef2;
 	}
 
 	int delta[2], samp1[2], samp2[2];
 
-	for ( i = 0; i < 2; i++, pIn += 2 )
+	for ( i = 0; i < 2; i++ )
 	{
-		// read initial delta
-		delta[i] = *((short *)pIn);
+		unsigned short value;
+		memcpy( &value, pIn, sizeof(value) );
+		pIn += sizeof(value);
+		delta[i] = value;
 	}
 
 	// read initial samples for prediction
-	for ( i = 0; i < 2; i++, pIn += 2 )
+	for ( i = 0; i < 2; i++ )
 	{
-		samp1[i] = *((short *)pIn);
+		short value;
+		memcpy( &value, pIn, sizeof(value) );
+		pIn += sizeof(value);
+		samp1[i] = value;
 	}
-	for ( i = 0; i < 2; i++, pIn += 2 )
+	for ( i = 0; i < 2; i++ )
 	{
-		samp2[i] = *((short *)pIn);
+		short value;
+		memcpy( &value, pIn, sizeof(value) );
+		pIn += sizeof(value);
+		samp2[i] = value;
 	}
 
 	// write out the initial samples (stored in reverse order)
@@ -275,7 +291,7 @@ void CAudioMixerWaveADPCM::DecompressBlockStereo( short *pOut, const char *pIn, 
 			int errorSign = error_sign_lut[error];
 
 			// interpolate the new sample
-			int predSample = (samp1[i] * co1[i]) + (samp2[i] * co2[i]);
+			long long predSample = (static_cast<long long>( samp1[i] ) * co1[i]) + (static_cast<long long>( samp2[i] ) * co2[i]);
 			// coefficients are fixed point 8-bit, so shift back to 16-bit integer
 			predSample >>= 8;
 
@@ -298,7 +314,7 @@ void CAudioMixerWaveADPCM::DecompressBlockStereo( short *pOut, const char *pIn, 
 			*pOut++ = (short)predSample;
 			// move samples over
 			samp2[i] = samp1[i];
-			samp1[i] = predSample;
+			samp1[i] = static_cast<int>( predSample );
 		}
 		count--;
 	}
@@ -319,17 +335,29 @@ bool CAudioMixerWaveADPCM::DecodeBlock( void )
 
 	// fixup position with possible loop
 	CAudioSourceWave &source = reinterpret_cast<CAudioSourceWave &>(m_pData->Source());
-	m_offset = source.ConvertLoopedPosition( m_offset );
+	int channelCount = NumChannels();
+	if ( !m_pFormat || !m_pSamples || !m_pCoefficients || ( channelCount != 1 && channelCount != 2 ) ||
+		 m_blockSize <= 0 || m_blockSize >= MAX_BLOCK_SIZE || m_offset < 0 )
+		return false;
 
+	firstSample = 0;
 	if ( m_offset >= m_totalBytes )
 	{
-		// no more data
-		return false;
+		int loopStart = source.GetLoopingInfo( NULL, NULL, NULL );
+		if ( loopStart < 0 )
+			return false;
+		long long loopBlock = loopStart / m_pFormat->wSamplesPerBlock;
+		long long loopOffset = loopBlock * m_blockSize;
+		if ( loopOffset < 0 || loopOffset >= m_totalBytes )
+			return false;
+		m_offset = static_cast<int>( loopOffset );
+		firstSample = loopStart % m_pFormat->wSamplesPerBlock;
 	}
 
 	// can only decode in block sized chunks
-	firstSample = m_offset % m_blockSize;
-	m_offset    = m_offset - firstSample;
+	int blockRemainder = m_offset % m_blockSize;
+	if ( blockRemainder )
+		return false;
 
 	// adpcm must calculate and request correct block size for proper decoding
 	// last block size may be truncated
@@ -341,12 +369,16 @@ bool CAudioMixerWaveADPCM::DecodeBlock( void )
 
 	// get requested data
 	int available = m_pData->ReadSourceData( (void **)(&pData), m_offset, blockSize, NULL );
+	if ( available < 0 || available > blockSize || ( available > 0 && !pData ) )
+		return false;
 	if ( available < blockSize )
 	{
 		// pump to get all of requested data
 		int total = 0;
 		while ( available && total < blockSize )
 		{
+			if ( available < 0 || available > blockSize - total || !pData )
+				return false;
 			memcpy( tmpBlock + total, pData, available );
 			total += available;
 			available = m_pData->ReadSourceData( (void **)(&pData), m_offset + total, blockSize - total, NULL );
@@ -355,22 +387,24 @@ bool CAudioMixerWaveADPCM::DecodeBlock( void )
 		available = total;
 	}
 
-	if ( !available )
+	if ( available != blockSize || available < 7 * channelCount )
 	{
 		// no more data
 		return false;
 	}
 
-	// advance the file pointer
-	m_offset += available;
-
-	int channelCount = NumChannels();
-
 	// this is sample pairs for stereo, samples for mono
-	m_sampleCount = m_pFormat->wSamplesPerBlock;
+	int decodedSamples = WaveADPCMSampleCount( channelCount, m_pFormat->wSamplesPerBlock, available );
+	if ( decodedSamples < 2 || decodedSamples > m_pFormat->wSamplesPerBlock )
+		return false;
+	for ( int i = 0; i < channelCount; ++i )
+	{
+		if ( static_cast<unsigned char>( pData[i] ) >= m_pFormat->wNumCoef )
+			return false;
+	}
 
-	// short block?, fixup sample count (2 samples per byte, divided by number of channels per sample set)
-	m_sampleCount -= ((m_blockSize - available) * 2) / channelCount;
+	m_sampleCount = decodedSamples;
+	m_offset += available;
 
 	// new block, start at the first sample
 	m_samplePosition = firstSample;
@@ -396,6 +430,8 @@ bool CAudioMixerWaveADPCM::DecodeBlock( void )
 //-----------------------------------------------------------------------------
 int CAudioMixerWaveADPCM::GetOutputData( void **pData, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] )
 {
+	if ( !pData || sampleCount <= 0 )
+		return 0;
 	if ( m_samplePosition >= m_sampleCount )
 	{
 		if ( !DecodeBlock() )
@@ -431,23 +467,42 @@ int CAudioMixerWaveADPCM::GetOutputData( void **pData, int sampleCount, char cop
 //-----------------------------------------------------------------------------
 void CAudioMixerWaveADPCM::SetSampleStart( int newPosition )
 {
+	if ( newPosition < 0 )
+		newPosition = 0;
+
 	// cascade to base wave to update sample counter
 	CAudioMixerWave::SetSampleStart( newPosition );
 	
+	if ( !m_pFormat || !m_pSamples || m_blockSize <= 0 )
+		return;
+
 	// which block is the desired starting sample in?
 	int blockStart = newPosition / m_pFormat->wSamplesPerBlock;
 	// how far into the block is the sample
 	int blockOffset = newPosition % m_pFormat->wSamplesPerBlock;
 
 	// set the file position
-	m_offset = blockStart * m_blockSize;
+	long long byteOffset = static_cast<long long>( blockStart ) * m_blockSize;
+	if ( byteOffset < 0 || byteOffset > m_totalBytes )
+	{
+		m_offset = m_totalBytes;
+		m_sampleCount = 0;
+		m_samplePosition = 0;
+		return;
+	}
+	m_offset = static_cast<int>( byteOffset );
 	
 	// NOTE: Must decode a block here to properly position the sample Index
 	// THIS MEANS YOU DON'T WANT TO CALL THIS ROUTINE OFTEN FOR ADPCM SOUNDS
-	DecodeBlock();
+	if ( !DecodeBlock() )
+	{
+		m_sampleCount = 0;
+		m_samplePosition = 0;
+		return;
+	}
 	
 	// limit to the samples decoded
-	if ( blockOffset < m_sampleCount )
+	if ( blockOffset > m_sampleCount )
 		blockOffset = m_sampleCount;
 	
 	// set the new current position
