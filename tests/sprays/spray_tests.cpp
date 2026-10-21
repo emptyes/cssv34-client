@@ -1,3 +1,6 @@
+#ifndef _FORTIFY_SOURCE
+#define _FORTIFY_SOURCE 2
+#endif
 #include <algorithm>
 #include <climits>
 #include <cstdarg>
@@ -162,9 +165,42 @@ static void Reject(const std::vector<byte> &input) {
 static void NoTemps(const std::string &directory) {
     for (const auto &entry : fs::directory_iterator(directory)) Require(entry.path().filename().string().rfind("temp", 0) != 0, "temporary file leaked");
 }
+static std::vector<byte> TGA(int bits = 32, int descriptor = 0x20, int id = 0) {
+    std::vector<byte> out(18,0); out[0] = id; out[2] = 2; out[12] = 2; out[14] = 2; out[16] = bits; out[17] = descriptor;
+    out.insert(out.end(),id,0xab);
+    for (int pixel = 0; pixel < 4; ++pixel) { out.push_back(10+pixel); out.push_back(20+pixel); out.push_back(30+pixel); if (bits == 32) out.push_back(40+pixel); }
+    return out;
+}
+static void CheckTGA(const std::string &dir) {
+    const std::string path = dir + "/bounds.tga";
+    const auto valid = TGA();
+    auto reject = [&](const std::vector<byte> &bytes) {
+        Save(path,bytes); int w = 71, h = 82; ConversionErrorType code = CE_SUCCESS; TGAHeader header = {};
+        byte *data = ImgUtl_ReadTGAAsRGBA(path.c_str(),w,h,code,header);
+        Require(!data && code != CE_SUCCESS && w == 71 && h == 82,"truncated or invalid TGA accepted");
+        int calls = vtexCalls;
+        Require(ImgUtl_ConvertTGAToVTF(path.c_str(),256,256) != CE_SUCCESS && vtexCalls == calls,"invalid TGA reached VTex");
+    };
+    for (size_t n = 0; n < valid.size(); ++n) reject({valid.begin(),valid.begin()+n});
+    for (int offset : {12,14}) { auto bad = valid; bad[offset] = 0; reject(bad); bad[offset] = 0xff; bad[offset+1] = 0xff; reject(bad); }
+    auto bad = valid; bad[12] = bad[13] = bad[14] = bad[15] = 0x7f; reject(bad);
+    bad = valid; bad[0] = 255; reject(bad);
+    for (int offset : {1,2,16,17}) { bad = valid; bad[offset] = offset == 17 ? 0x10 : 1; reject(bad); }
+    for (int bits : {24,32}) for (int descriptor : {0,0x20}) for (int id : {0,7,255}) {
+        Save(path,TGA(bits,descriptor,id)); int w = 0, h = 0; ConversionErrorType code; TGAHeader header;
+        byte *data = ImgUtl_ReadTGAAsRGBA(path.c_str(),w,h,code,header);
+        Require(data && code == CE_SUCCESS && w == 2 && h == 2,"valid TGA rejected");
+        for (int pixel = 0; pixel < 4; ++pixel) {
+            int src = descriptor == 0 ? (1-pixel/2)*2+pixel%2 : pixel;
+            Require(data[pixel*4] == 30+src && data[pixel*4+1] == 20+src && data[pixel*4+2] == 10+src && data[pixel*4+3] == (bits == 32 ? 40+src : 255),"TGA ID, alpha or orientation changed");
+        }
+        free(data);
+    }
+    fs::remove(path);
+}
 int main(int argc, char **argv) {
     Require(argc == 2, "arguments"); const std::string dir = argv[1]; fileSystem.game = dir + "/game";
-    CheckFilters(); CheckFiltersWithoutPNG();
+    CheckFilters(); CheckFiltersWithoutPNG(); CheckTGA(dir);
     for (int test = 0; test < 4; ++test) Require(InvalidRead(test), "invalid callback read accepted");
     std::ifstream names(dir + "/cases.txt"); std::string name; int valid = 0;
     while (std::getline(names, name)) {

@@ -15,6 +15,7 @@
 #include "filesystem/IQueuedLoader.h"
 #include "tier1/lzmaDecoder.h"
 #include "tier2/fileutils.h"
+#include "tier2/waveformat.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -55,26 +56,9 @@ void ChunkError( unsigned int id )
 //-----------------------------------------------------------------------------
 int ADPCMSampleCount( ADPCMWAVEFORMAT *pFormat, int length )
 {
-	// determine a true sample count
-	int nChannels = LittleWord( pFormat->wfx.nChannels );
-	int wSamplesPerBlock = LittleWord( pFormat->wSamplesPerBlock );
-
-	int blockSize = (( wSamplesPerBlock - 2) * nChannels ) / 2;
-	blockSize += 7 * nChannels;
-
-	int blockCount = length / blockSize;
-	int blockRem = length % blockSize;
-	
-	// total samples in complete blocks
-	int sampleCount = blockCount * wSamplesPerBlock;
-
-	// add remaining in a short block
-	if ( blockRem )
-	{
-		sampleCount += wSamplesPerBlock - (((blockSize - blockRem) * 2) / nChannels );
-	}
-
-	return sampleCount;
+	if ( !pFormat )
+		return 0;
+	return WaveADPCMSampleCount( LittleWord( pFormat->wfx.nChannels ), LittleWord( pFormat->wSamplesPerBlock ), length );
 }
 
 //-----------------------------------------------------------------------------
@@ -661,90 +645,62 @@ void CAudioSourceWave::Setup( const char *pFormatBuffer, int formatSize, Iterate
 bool CAudioSourceWave::GetStartupData( void *dest, int destsize, int& bytesCopied )
 {
 	bytesCopied = 0;
+	if ( destsize < 0 || ( destsize > 0 && !dest ) )
+		return false;
 
 	char formatBuffer[1024];
 	const char *pName = m_pSfx->GetFileName();
 	InFileRIFF riff( pName, *g_pSndIO );
-
 	if ( riff.RIFFName() != RIFF_WAVE )
-	{
 		return false;
-	}
 
-	// set up the iterator for the whole file (root RIFF is a chunk)
 	IterateRIFF walk( riff, riff.RIFFSize() );
-
-	int format = 0;
+	WaveFormatInfo_t info;
 	int formatSize = 0;
-
-	// This chunk must be first as it contains the wave's format
-	// break out when we've parsed it
-	while ( walk.ChunkAvailable() && format == 0 )
+	while ( walk.ChunkAvailable() && formatSize == 0 )
 	{
-		switch( walk.ChunkName() )
+		if ( walk.ChunkName() == WAVE_FMT )
 		{
-		case WAVE_FMT:
-			{
-				if ( walk.ChunkSize() <= sizeof( formatBuffer ) )
-				{
-					walk.ChunkRead( formatBuffer );
-					formatSize = walk.ChunkSize();
-					format = ((WAVEFORMATEX *)formatBuffer)->wFormatTag;
-					if( ((WAVEFORMATEX *)formatBuffer)->wBitsPerSample > 16)
-					{
-						Warning("Unsupported %d-bit wave file %s\n", (int)((WAVEFORMATEX *)formatBuffer)->wBitsPerSample, pName);
-					}
-				}
-			}
-			break;
-		default:
-			{
-				ChunkError( walk.ChunkName() );
-			}
-			break;
+			unsigned int size = walk.ChunkSize();
+			if ( size < 16 || size > sizeof( formatBuffer ) || walk.ChunkRead( formatBuffer ) != static_cast<int>( size ) ||
+				 !WaveFormatParse( formatBuffer, static_cast<int>( size ), info ) )
+				return false;
+			formatSize = static_cast<int>( size );
+		}
+		else
+		{
+			ChunkError( walk.ChunkName() );
 		}
 		walk.ChunkNext();
 	}
-
-	// Not really a WAVE file or no format chunk, bail
-	if ( !format )
-	{
+	if ( !formatSize )
 		return false;
-	}
 
 	Setup( formatBuffer, formatSize, walk );
-
-	if ( !m_dataStart || !m_dataSize )
-	{
-		// failed during setup
+	if ( m_dataStart <= 0 || m_dataSize <= 0 || m_sampleSize <= 0 )
 		return false;
-	}
 
-	// requesting precache snippet as leader for streaming startup latency
-	if ( destsize )
+	if ( destsize > 0 )
 	{
-		intp file = g_pSndIO->open( m_pSfx->GetFileName() );
+		intp file = g_pSndIO->open( pName );
 		if ( !file )
-		{
 			return false;
-		}
 
-		int bytesNeeded = m_channels * ( m_bits >> 3 ) * m_rate * SND_ASYNC_LOOKAHEAD_SECONDS;
-
-		// Round to multiple of 4
+		double budget = static_cast<double>( m_channels ) * ( m_bits >> 3 ) * m_rate * SND_ASYNC_LOOKAHEAD_SECONDS;
+		int bytesNeeded = budget >= INT_MAX - 3 ? INT_MAX - 3 : static_cast<int>( budget );
 		bytesNeeded = ( bytesNeeded + 3 ) & ~3;
-
-		bytesCopied = min( destsize, m_dataSize );
-		bytesCopied = min( bytesNeeded, bytesCopied );
+		int count = min( destsize, m_dataSize );
+		count = min( bytesNeeded, count );
 
 		g_pSndIO->seek( file, m_dataStart );
-		g_pSndIO->read( dest, bytesCopied, file );
+		int bytesRead = g_pSndIO->read( dest, count, file );
 		g_pSndIO->close( file );
+		if ( bytesRead != count )
+			return false;
 
-		// some samples need to be converted
-		ConvertSamples( (char *)dest, ( bytesCopied / m_sampleSize ) );
+		bytesCopied = count;
+		ConvertSamples( static_cast<char *>( dest ), bytesCopied / m_sampleSize );
 	}
-
 	return true;
 }
 
@@ -1882,78 +1838,38 @@ void MaybeReportMissingWav( char const *wav )
 static float Audio_GetWaveDuration( char const *pName )
 {
 	if ( IsX360() )
-	{
-		// should have precached
-		return 0;
-	}
-
-	char formatBuffer[1024];
-	WAVEFORMATEX *pfmt = (WAVEFORMATEX *)formatBuffer;
+		return 0.0f;
 
 	InFileRIFF riff( pName, *g_pSndIO );
-
 	if ( riff.RIFFName() != RIFF_WAVE )
 	{
 		MaybeReportMissingWav( pName );
 		return 0.0f;
 	}
 
-	// set up the iterator for the whole file (root RIFF is a chunk)
+	char formatBuffer[1024];
+	WaveFormatInfo_t info;
+	bool found = false;
 	IterateRIFF walk( riff, riff.RIFFSize() );
-
-	int format = 0;
-	int formatSize = 0;
-	int sampleCount = 0;
-
-	// This chunk must be first as it contains the wave's format
-	// break out when we've parsed it
-	while ( walk.ChunkAvailable() && ( format == 0 || sampleCount == 0 ) )
+	while ( walk.ChunkAvailable() )
 	{
-		switch( walk.ChunkName() )
+		if ( walk.ChunkName() == WAVE_FMT )
 		{
-		case WAVE_FMT:
-			if ( walk.ChunkSize() <= sizeof( formatBuffer ) )
-			{
-				walk.ChunkRead( formatBuffer );
-				formatSize = walk.ChunkSize();
-				format = LittleWord( pfmt->wFormatTag );
-			}
-			break;
-		case WAVE_DATA:
-			if ( format != 0 )
-			{
-				int dataSize = walk.ChunkSize();
-				if ( format == WAVE_FORMAT_ADPCM )
-				{
-					// Dummy size for now
-					sampleCount = dataSize;
-				}
-				else
-				{
-					sampleCount = dataSize / ( LittleWord( pfmt->wBitsPerSample ) >> 3 );
-				}
-			}
-			break;
-		default:
-			ChunkError( walk.ChunkName() );
-			break;
+			unsigned int size = walk.ChunkSize();
+			if ( size < 16 || size > sizeof( formatBuffer ) || walk.ChunkRead( formatBuffer ) != static_cast<int>( size ) ||
+				 !WaveFormatParse( formatBuffer, static_cast<int>( size ), info ) )
+				return 0.0f;
+			found = true;
+		}
+		else if ( walk.ChunkName() == WAVE_DATA && found )
+		{
+			int sampleCount = WaveFormatSampleCount( info, walk.ChunkSize() );
+			if ( sampleCount > 0 )
+				return static_cast<float>( sampleCount ) / info.rate;
 		}
 		walk.ChunkNext();
 	}
-
-	// Not really a WAVE file or no format chunk, bail
-	if ( !format || !sampleCount )
-		return 0.0f;
-
-	float sampleRate = LittleDWord( pfmt->nSamplesPerSec );
-
-	if ( format == WAVE_FORMAT_ADPCM )
-	{
-		// Determine actual duration
-		sampleCount = ADPCMSampleCount( (ADPCMWAVEFORMAT *)formatBuffer, sampleCount );
-	}
-
-	return (float)sampleCount / sampleRate;
+	return 0.0f;
 }
 
 //-----------------------------------------------------------------------------

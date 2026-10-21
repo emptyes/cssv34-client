@@ -47,7 +47,7 @@ def main():
             'static void ReadPNGData(',
             'unsigned char *ImgUtl_ReadPNGAsRGBAFromBuffer(',
             'unsigned char *ImgUtl_ReadPNGAsRGBA(',
-            'static void ImgUtl_ReadTGAHeader(', 'static void WriteTGAHeader(',
+            'static bool ImgUtl_ReadTGAHeader(', 'static bool ImgUtl_GetTGADataSize(', 'static void WriteTGAHeader(',
             'unsigned char * ImgUtl_ReadTGAAsRGBA(',
             'ConversionErrorType ImgUtl_StretchRGBAImage(', 'ConversionErrorType ImgUtl_PadRGBAImage(',
             'ConversionErrorType ImgUtl_ConvertTGA(',

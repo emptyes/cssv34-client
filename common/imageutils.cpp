@@ -359,25 +359,46 @@ unsigned char *ImgUtl_ReadVTFAsRGBA( const char *vtfPath, int &width, int &heigh
 }
 
 // read a TGA header from the current point in the file stream.
-static void ImgUtl_ReadTGAHeader(FILE *infile, TGAHeader &header)
+static bool ImgUtl_ReadTGAHeader(FILE *infile, TGAHeader &header)
 {
-	if (infile == NULL)
-	{
-		return;
-	}
+	if ( !infile )
+		return false;
 
-	fread(&header.identsize, sizeof(header.identsize), 1, infile);
-	fread(&header.colourmaptype, sizeof(header.colourmaptype), 1, infile);
-	fread(&header.imagetype, sizeof(header.imagetype), 1, infile);
-	fread(&header.colourmapstart, sizeof(header.colourmapstart), 1, infile);
-	fread(&header.colourmaplength, sizeof(header.colourmaplength), 1, infile);
-	fread(&header.colourmapbits, sizeof(header.colourmapbits), 1, infile);
-	fread(&header.xstart, sizeof(header.xstart), 1, infile);
-	fread(&header.ystart, sizeof(header.ystart), 1, infile);
-	fread(&header.width, sizeof(header.width), 1, infile);
-	fread(&header.height, sizeof(header.height), 1, infile);
-	fread(&header.bits, sizeof(header.bits), 1, infile);
-	fread(&header.descriptor, sizeof(header.descriptor), 1, infile);
+	TGAHeader parsed = {};
+	if (
+		fread( &parsed.identsize, sizeof( parsed.identsize ), 1, infile ) == 1 &&
+		fread( &parsed.colourmaptype, sizeof( parsed.colourmaptype ), 1, infile ) == 1 &&
+		fread( &parsed.imagetype, sizeof( parsed.imagetype ), 1, infile ) == 1 &&
+		fread( &parsed.colourmapstart, sizeof( parsed.colourmapstart ), 1, infile ) == 1 &&
+		fread( &parsed.colourmaplength, sizeof( parsed.colourmaplength ), 1, infile ) == 1 &&
+		fread( &parsed.colourmapbits, sizeof( parsed.colourmapbits ), 1, infile ) == 1 &&
+		fread( &parsed.xstart, sizeof( parsed.xstart ), 1, infile ) == 1 &&
+		fread( &parsed.ystart, sizeof( parsed.ystart ), 1, infile ) == 1 &&
+		fread( &parsed.width, sizeof( parsed.width ), 1, infile ) == 1 &&
+		fread( &parsed.height, sizeof( parsed.height ), 1, infile ) == 1 &&
+		fread( &parsed.bits, sizeof( parsed.bits ), 1, infile ) == 1 &&
+		fread( &parsed.descriptor, sizeof( parsed.descriptor ), 1, infile ) == 1 )
+	{
+		header = parsed;
+		return true;
+	}
+	return false;
+}
+
+static bool ImgUtl_GetTGADataSize( FILE *file, const TGAHeader &header, int &dataSize )
+{
+	if ( header.width <= 0 || header.height <= 0 || ( header.bits != 24 && header.bits != 32 ) ||
+		 header.width > INT_MAX / 4 / header.height )
+		return false;
+
+	dataSize = header.width * header.height * ( header.bits / 8 );
+	long offset = 18 + header.identsize;
+	if ( fseek( file, 0, SEEK_END ) != 0 )
+		return false;
+	long size = ftell( file );
+	if ( size < offset || size - offset < dataSize )
+		return false;
+	return fseek( file, offset, SEEK_SET ) == 0;
 }
 
 // write a TGA header to the current point in the file stream.
@@ -413,10 +434,16 @@ unsigned char * ImgUtl_ReadTGAAsRGBA(const char *tgaPath, int &width, int &heigh
 	}
 
 	// read header for TGA file.
-	ImgUtl_ReadTGAHeader(tgaFile, tgaHeader);
+	if ( !ImgUtl_ReadTGAHeader( tgaFile, tgaHeader ) )
+	{
+		fclose( tgaFile );
+		errcode = CE_ERROR_PARSING_SOURCE;
+		return NULL;
+	}
 
 	if (
 		( tgaHeader.imagetype != 2 ) // image type 2 is uncompressed RGB, other types not supported.
+		|| tgaHeader.colourmaptype != 0
 		|| ( tgaHeader.descriptor & 0x10 ) // Origin on righthand side (flipped horizontally from common sense) --- nobody ever uses this
 		|| ( tgaHeader.bits != 24 && tgaHeader.bits != 32 ) // Must be 24- ot 32-bit
 	)
@@ -427,7 +454,13 @@ unsigned char * ImgUtl_ReadTGAAsRGBA(const char *tgaPath, int &width, int &heigh
 		return NULL;
 	}
 
-	int tgaDataSize = tgaHeader.width * tgaHeader.height * tgaHeader.bits / 8;
+	int tgaDataSize;
+	if ( !ImgUtl_GetTGADataSize( tgaFile, tgaHeader, tgaDataSize ) )
+	{
+		fclose( tgaFile );
+		errcode = CE_ERROR_PARSING_SOURCE;
+		return NULL;
+	}
 	unsigned char *tgaData = (unsigned char *)malloc(tgaDataSize);
 	if (tgaData == NULL)
 	{
@@ -437,7 +470,13 @@ unsigned char * ImgUtl_ReadTGAAsRGBA(const char *tgaPath, int &width, int &heigh
 		return NULL;
 	}
 
-	fread(tgaData, 1, tgaDataSize, tgaFile);
+	if ( fread( tgaData, 1, tgaDataSize, tgaFile ) != static_cast<size_t>( tgaDataSize ) )
+	{
+		free( tgaData );
+		fclose( tgaFile );
+		errcode = CE_ERROR_PARSING_SOURCE;
+		return NULL;
+	}
 
 	fclose(tgaFile);
 
@@ -1415,7 +1454,11 @@ ConversionErrorType ImgUtl_ConvertTGAToVTF(const char *tgaPath, int nMaxWidth/*=
 
 	// read out the header of the image.
 	TGAHeader header;
-	ImgUtl_ReadTGAHeader(infile, header);
+	if ( !ImgUtl_ReadTGAHeader( infile, header ) )
+	{
+		fclose( infile );
+		return CE_ERROR_PARSING_SOURCE;
+	}
 
 	// check to make sure that the TGA has the proper dimensions and size.
 	if (!IsPowerOfTwo(header.width) || !IsPowerOfTwo(header.height))
@@ -1433,15 +1476,12 @@ ConversionErrorType ImgUtl_ConvertTGAToVTF(const char *tgaPath, int nMaxWidth/*=
 		return CE_SOURCE_FILE_SIZE_NOT_SUPPORTED;
 	}
 
-	int imageMemoryFootprint = header.width * header.height * header.bits / 8;
-
-	CUtlBuffer inbuf(0, imageMemoryFootprint);
-
-	// read in the image
-	int nBytesRead = fread(inbuf.Base(), imageMemoryFootprint, 1, infile);
-
-	fclose(infile);
-	inbuf.SeekPut( CUtlBuffer::SEEK_HEAD, nBytesRead );
+	int imageMemoryFootprint;
+	bool valid = header.colourmaptype == 0 && header.imagetype == 2 && !( header.descriptor & 0x10 ) &&
+		ImgUtl_GetTGADataSize( infile, header, imageMemoryFootprint );
+	fclose( infile );
+	if ( !valid )
+		return CE_ERROR_PARSING_SOURCE;
 
 	// load vtex_dll.dll and get the interface to it.
 	CSysModule *vtexmod = Sys_LoadModule("vtex_dll" DLL_EXT_STRING);
