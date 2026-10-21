@@ -771,12 +771,11 @@ void CAudioSourceWave::ParseCueChunk( IterateRIFF &walk )
 
 	// assume that the cue chunk stored in the wave is the start of the loop
 	// assume only one cue chunk, UNDONE: Test this assumption here?
+	if ( walk.ChunkSize() < sizeof(int) + sizeof(cue_chunk) )
+		return;
 	cueCount = walk.ChunkReadInt();
-	if ( cueCount > 0 )
-	{
-		walk.ChunkReadPartial( &cue_chunk, sizeof(cue_chunk) );
+	if ( cueCount > 0 && walk.ChunkReadPartial( &cue_chunk, sizeof(cue_chunk) ) == sizeof(cue_chunk) )
 		m_loopStart = LittleLong( cue_chunk.dwSampleOffset );
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -815,7 +814,9 @@ void CAudioSourceWave::ParseSamplerChunk( IterateRIFF &walk )
 	// assume that the loop end is the sample end
 	// assume that only the first loop is relevant
 
-	walk.ChunkReadPartial( &samplerChunk, sizeof(samplerChunk) );
+	if ( walk.ChunkSize() < sizeof(samplerChunk) ||
+		walk.ChunkReadPartial( &samplerChunk, sizeof(samplerChunk) ) != sizeof(samplerChunk) )
+		return;
 	if ( LittleLong( samplerChunk.cSampleLoops ) > 0 )
 	{
 		// only support normal forward loops

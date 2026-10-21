@@ -11,6 +11,7 @@
 
 #include "riff.h"
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 #include "tier0/dbg.h"
 
@@ -78,36 +79,27 @@ public:
 // Input  : *pFileName 
 //			&io - I/O interface
 //-----------------------------------------------------------------------------
-InFileRIFF::InFileRIFF( const char *pFileName, IFileReadBinary &io ) : m_io(io)
+InFileRIFF::InFileRIFF( const char *pFileName, IFileReadBinary &io )
+	: m_io(io), m_file(0), m_riffName(0), m_riffSize(0)
 {
 	m_file = m_io.open( pFileName );
-	
-	int riff = 0;
 	if ( !m_file )
-	{
-		m_riffSize = 0;
-		m_riffName = 0;
 		return;
-	}
 
-	riff = ReadInt();
-	if ( riff != RIFF_ID )
+	const unsigned int fileSize = m_io.size( m_file );
+	if ( fileSize < 12 || fileSize > INT_MAX )
+		return;
+
+	int header[3];
+	if ( m_io.read( header, sizeof(header), m_file ) != sizeof(header) )
+		return;
+	if ( LittleLong( header[0] ) != RIFF_ID )
 	{
 		printf( "Not a RIFF File [%s]\n", pFileName );
-		m_riffSize = 0;
+		return;
 	}
-	else
-	{
-		// we store size as size of all chunks
-		// subtract off the RIFF form type (e.g. 'WAVE', 4 bytes)
-		m_riffSize = ReadInt() - 4;
-		m_riffName = ReadInt();
-
-		// HACKHACK: LWV files don't obey the RIFF format!!!
-		// Do this or miss the linguistic chunks at the end. Lame!
-		// subtract off 12 bytes for (RIFF, size, WAVE)
-		m_riffSize = m_io.size( m_file ) - 12;
-	}
+	m_riffName = LittleLong( header[2] );
+	m_riffSize = fileSize - 12;
 }
 
 
@@ -126,11 +118,10 @@ InFileRIFF::~InFileRIFF( void )
 //-----------------------------------------------------------------------------
 int InFileRIFF::ReadInt( void )
 {
-	int tmp = 0;
-	m_io.read( &tmp, sizeof(int), m_file );
-	tmp = LittleLong( tmp );
-
-	return tmp;
+	int value = 0;
+	if ( ReadData( &value, sizeof(value) ) != sizeof(value) )
+		return 0;
+	return LittleLong( value );
 }
 
 //-----------------------------------------------------------------------------
@@ -141,9 +132,13 @@ int InFileRIFF::ReadInt( void )
 //-----------------------------------------------------------------------------
 int InFileRIFF::ReadData( void *pOutput, int dataSize )
 {
-	int count = m_io.read( pOutput, dataSize, m_file );
-
-	return count;
+	if ( !m_file || !pOutput || dataSize <= 0 )
+		return 0;
+	const unsigned int position = m_io.tell( m_file );
+	const unsigned int fileSize = m_io.size( m_file );
+	if ( position > fileSize || (unsigned int)dataSize > fileSize - position )
+		return 0;
+	return m_io.read( pOutput, dataSize, m_file );
 }
 
 
@@ -153,7 +148,10 @@ int InFileRIFF::ReadData( void *pOutput, int dataSize )
 //-----------------------------------------------------------------------------
 int InFileRIFF::PositionGet( void )
 {
-	return m_io.tell( m_file );
+	if ( !m_file )
+		return -1;
+	const unsigned int position = m_io.tell( m_file );
+	return position <= INT_MAX ? (int)position : -1;
 }
 
 
@@ -163,7 +161,8 @@ int InFileRIFF::PositionGet( void )
 //-----------------------------------------------------------------------------
 void InFileRIFF::PositionSet( int position )
 {
-	m_io.seek( m_file, position );
+	if ( m_file && position >= 0 && (unsigned int)position <= m_io.size( m_file ) )
+		m_io.seek( m_file, position );
 }
 
 //-----------------------------------------------------------------------------
@@ -256,17 +255,14 @@ void OutFileRIFF::PositionSet( int position )
 //			size - size of file or sub-chunk
 //-----------------------------------------------------------------------------
 IterateRIFF::IterateRIFF( InFileRIFF &riff, int size )
-	: m_riff(riff), m_size(size)
+	: m_riff(riff), m_start(0), m_size(size), m_chunkName(0), m_chunkSize(-1), m_chunkPosition(0)
 {
-	if ( !m_riff.RIFFSize() )
-	{
-		// bad file, just be an empty iterator
-		ChunkClear();
+	if ( !m_riff.RIFFSize() || size < 0 )
 		return;
-	}
-
-	// get the position and parse a chunk
 	m_start = riff.PositionGet();
+	const int fileEnd = 12 + (int)m_riff.RIFFSize();
+	if ( m_start < 12 || m_start > fileEnd || size > fileEnd - m_start )
+		return;
 	ChunkSetup();
 }
 
@@ -276,9 +272,12 @@ IterateRIFF::IterateRIFF( InFileRIFF &riff, int size )
 // Input  : &parent - parent iterator
 //-----------------------------------------------------------------------------
 IterateRIFF::IterateRIFF( IterateRIFF &parent )
-	: m_riff(parent.m_riff), m_size(parent.ChunkSize())
+	: m_riff(parent.m_riff), m_start(0), m_size(0), m_chunkName(0), m_chunkSize(-1), m_chunkPosition(0)
 {
-	m_start = parent.ChunkFilePosition();
+	if ( !parent.ChunkAvailable() )
+		return;
+	m_start = parent.m_chunkPosition + 8;
+	m_size = parent.m_chunkSize;
 	ChunkSetup();
 }
 
@@ -289,10 +288,19 @@ IterateRIFF::IterateRIFF( IterateRIFF &parent )
 //-----------------------------------------------------------------------------
 void IterateRIFF::ChunkSetup( void )
 {
+	ChunkClear();
 	m_chunkPosition = m_riff.PositionGet();
-
-	m_chunkName = m_riff.ReadInt();
-	m_chunkSize = m_riff.ReadInt();
+	if ( m_chunkPosition < m_start || m_chunkPosition - m_start > m_size ||
+		m_size - ( m_chunkPosition - m_start ) < 8 )
+		return;
+	int header[2];
+	if ( m_riff.ReadData( header, sizeof(header) ) != sizeof(header) )
+		return;
+	const int size = LittleLong( header[1] );
+	if ( size < 0 || size >= 0x10000000 || size > m_size - ( m_chunkPosition - m_start ) - 8 )
+		return;
+	m_chunkName = LittleLong( header[0] );
+	m_chunkSize = size;
 }
 
 //-----------------------------------------------------------------------------
@@ -300,6 +308,7 @@ void IterateRIFF::ChunkSetup( void )
 //-----------------------------------------------------------------------------
 void IterateRIFF::ChunkClear( void )
 {
+	m_chunkName = 0;
 	m_chunkSize = -1;
 }
 
@@ -308,10 +317,7 @@ void IterateRIFF::ChunkClear( void )
 //-----------------------------------------------------------------------------
 bool IterateRIFF::ChunkAvailable( void )
 {
-	if ( m_chunkSize != -1 && m_chunkSize < 0x10000000 )
-		return true;
-
-	return false;
+	return m_chunkSize >= 0 && m_chunkSize < 0x10000000;
 }
 
 
@@ -322,23 +328,17 @@ bool IterateRIFF::ChunkNext( void )
 {
 	if ( !ChunkAvailable() )
 		return false;
-
-	int nextPos = m_chunkPosition + 8 + m_chunkSize;
-	
-	// chunks are aligned
-	nextPos += m_chunkSize & 1;
-
-	if ( nextPos >= (m_start + m_size) )
+	const int remaining = m_size - ( m_chunkPosition - m_start ) - 8;
+	const int padding = m_chunkSize & 1;
+	if ( m_chunkSize >= remaining - padding )
 	{
 		ChunkClear();
 		return false;
 	}
-
+	const int nextPos = m_chunkPosition + 8 + m_chunkSize + padding;
 	m_riff.PositionSet( nextPos );
-
 	ChunkSetup();
 	return ChunkAvailable();
-
 }
 
 
@@ -368,7 +368,7 @@ unsigned int IterateRIFF::ChunkSize( void )
 //-----------------------------------------------------------------------------
 int IterateRIFF::ChunkRead( void *pOutput )
 {
-	return m_riff.ReadData( pOutput, ChunkSize() );
+	return ChunkReadPartial( pOutput, m_chunkSize );
 }
 
 
@@ -380,6 +380,15 @@ int IterateRIFF::ChunkRead( void *pOutput )
 //-----------------------------------------------------------------------------
 int IterateRIFF::ChunkReadPartial( void *pOutput, int dataSize )
 {
+	if ( !ChunkAvailable() || !pOutput || dataSize <= 0 )
+		return 0;
+	const int position = m_riff.PositionGet();
+	const int start = m_chunkPosition + 8;
+	if ( position < start || position - start > m_chunkSize )
+		return 0;
+	const int remaining = m_chunkSize - ( position - start );
+	if ( dataSize > remaining )
+		dataSize = remaining;
 	return m_riff.ReadData( pOutput, dataSize );
 }
 
@@ -390,7 +399,10 @@ int IterateRIFF::ChunkReadPartial( void *pOutput, int dataSize )
 //-----------------------------------------------------------------------------
 int IterateRIFF::ChunkReadInt( void )
 {
-	return m_riff.ReadInt();
+	int value = 0;
+	if ( ChunkReadPartial( &value, sizeof(value) ) != sizeof(value) )
+		return 0;
+	return LittleLong( value );
 }
 
 //-----------------------------------------------------------------------------

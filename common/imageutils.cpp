@@ -85,6 +85,7 @@ extern void longjmp( jmp_buf, int ) __attribute__((noreturn));
 #endif
 
 #include <setjmp.h>
+#include <limits.h>
 
 #include "bitmap/tgawriter.h"
 #include "ivtex.h"
@@ -659,21 +660,14 @@ unsigned char *ImgUtl_ReadJPEGAsRGBA( const char *jpegPath, int &width, int &hei
 #if HAVE_PNG
 static void ReadPNGData( png_structp png_ptr, png_bytep outBytes, png_size_t byteCountToRead )
 {
-
-	// Cast pointer
 	CUtlBuffer *pBuf = (CUtlBuffer *)png_get_io_ptr( png_ptr );
-	Assert( pBuf );
-
-	// Check for IO error
-	if ( pBuf->TellGet() + (int)byteCountToRead > pBuf->TellPut() )
+	if ( !pBuf || pBuf->TellGet() < 0 || pBuf->TellGet() > pBuf->TellPut() ||
+		byteCountToRead > (size_t)( pBuf->TellPut() - pBuf->TellGet() ) )
 	{
-		// Attempt to read past the end of the buffer.
-		// Use longjmp to report the error
-		png_longjmp( png_ptr, 1 );
+		png_error( png_ptr, "Unexpected end of PNG data" );
+		return;
 	}
-
-	// Read the bytes
-	pBuf->Get( outBytes, byteCountToRead );
+	pBuf->Get( outBytes, (int)byteCountToRead );
 }
 #endif
 
@@ -716,152 +710,88 @@ unsigned char *ImgUtl_ReadPNGAsRGBA( const char *pngPath, int &width, int &heigh
 #endif
 }
 
-unsigned char		*ImgUtl_ReadPNGAsRGBAFromBuffer( CUtlBuffer &buffer, int &width, int &height, ConversionErrorType &errcode )
+unsigned char *ImgUtl_ReadPNGAsRGBAFromBuffer( CUtlBuffer &buffer, int &width, int &height, ConversionErrorType &errcode )
 {
 #if !defined( _X360 ) && HAVE_PNG
+	errcode = CE_ERROR_PARSING_SOURCE;
+	if ( !buffer.Base() || buffer.TellPut() < 8 ||
+		png_sig_cmp( (png_const_bytep)buffer.Base(), 0, 8 ) )
+		return NULL;
 
-	png_const_bytep pngData = (png_const_bytep)buffer.Base();
-	if (png_sig_cmp( pngData, 0, 8))
+	png_structp png_ptr = png_create_read_struct( PNG_LIBPNG_VER_STRING, NULL, NULL, NULL );
+	if ( !png_ptr )
 	{
-        errcode = CE_ERROR_PARSING_SOURCE;
+		errcode = CE_MEMORY_ERROR;
+		return NULL;
+	}
+	png_infop info_ptr = png_create_info_struct( png_ptr );
+	if ( !info_ptr )
+	{
+		png_destroy_read_struct( &png_ptr, NULL, NULL );
+		errcode = CE_MEMORY_ERROR;
 		return NULL;
 	}
 
-	png_structp png_ptr = NULL;
-	png_infop info_ptr = NULL;
-
-    /* could pass pointers to user-defined error handlers instead of NULLs: */
-
-    png_ptr = png_create_read_struct( PNG_LIBPNG_VER_STRING, NULL, NULL, NULL );
-    if (!png_ptr)
-    {
-        errcode = CE_MEMORY_ERROR;
+	unsigned char *volatile pResultData = NULL;
+	if ( setjmp( png_jmpbuf( png_ptr ) ) )
+	{
+		free( pResultData );
+		png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
+		errcode = CE_ERROR_PARSING_SOURCE;
 		return NULL;
 	}
 
-	unsigned char *pResultData = NULL;
-	png_bytepp  row_pointers = NULL;
-
-    info_ptr = png_create_info_struct( png_ptr );
-    if ( !info_ptr ) 
-	{
-        errcode = CE_MEMORY_ERROR;
-fail:
-        png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
-        if ( row_pointers )
-        {
-			free( row_pointers );
-		}
-        if ( pResultData )
-        {
-			free( pResultData );
-		}
-        return NULL;
-    }
-
-    /* setjmp() must be called in every function that calls a PNG-reading
-     * libpng function */
-
-    if ( setjmp( png_jmpbuf(png_ptr) ) ) 
-	{
-        errcode = CE_ERROR_PARSING_SOURCE;
-        goto fail;
-    }
-
+	buffer.SeekGet( CUtlBuffer::SEEK_HEAD, 0 );
 	png_set_read_fn( png_ptr, &buffer, ReadPNGData );
-    png_read_info( png_ptr, info_ptr );  /* read all PNG info up to image data */
+	png_read_info( png_ptr, info_ptr );
+	const png_uint_32 png_width = png_get_image_width( png_ptr, info_ptr );
+	const png_uint_32 png_height = png_get_image_height( png_ptr, info_ptr );
+	const int bit_depth = png_get_bit_depth( png_ptr, info_ptr );
+	const int color_type = png_get_color_type( png_ptr, info_ptr );
+	if ( !png_width || !png_height || png_width > INT_MAX / 4 ||
+		png_height > (png_uint_32)INT_MAX / ( png_width * 4 ) )
+		png_error( png_ptr, "PNG dimensions exceed output buffer limits" );
 
+	if ( color_type == PNG_COLOR_TYPE_PALETTE ||
+		( color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8 ) )
+		png_set_expand( png_ptr );
+	const bool hasTransparency = png_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) != 0;
+	if ( hasTransparency )
+		png_set_tRNS_to_alpha( png_ptr );
+	if ( bit_depth == 16 )
+		png_set_strip_16( png_ptr );
+	if ( color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA )
+		png_set_gray_to_rgb( png_ptr );
+	if ( !( color_type & PNG_COLOR_MASK_ALPHA ) && !hasTransparency )
+		png_set_filler( png_ptr, 0xff, PNG_FILLER_AFTER );
 
-    /* alternatively, could make separate calls to png_get_image_width(),
-     * etc., but want bit_depth and color_type for later [don't care about
-     * compression_type and filter_type => NULLs] */
+	const int passes = png_set_interlace_handling( png_ptr );
+	png_read_update_info( png_ptr, info_ptr );
+	const png_size_t rowbytes = png_get_rowbytes( png_ptr, info_ptr );
+	if ( png_get_channels( png_ptr, info_ptr ) != 4 || rowbytes != (size_t)png_width * 4 ||
+		rowbytes > (size_t)INT_MAX / png_height )
+		png_error( png_ptr, "Invalid PNG output layout" );
 
-	int bit_depth;
-	int color_type;
-	uint32 png_width;
-	uint32 png_height;
-
-	png_get_IHDR( png_ptr, info_ptr, &png_width, &png_height, &bit_depth, &color_type, NULL, NULL, NULL );
-
-	width = png_width;
-	height = png_height;
-
-    png_uint_32 rowbytes;
-
-    /* expand palette images to RGB, low-bit-depth grayscale images to 8 bits,
-     * transparency chunks to full alpha channel; strip 16-bit-per-sample
-     * images to 8 bits per sample; and convert grayscale to RGB[A] */
-
-    if (color_type == PNG_COLOR_TYPE_PALETTE)
-        png_set_expand( png_ptr );
-    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
-        png_set_expand( png_ptr );
-    if (png_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) )
-        png_set_expand( png_ptr );
-    if (bit_depth == 16)
-        png_set_strip_16( png_ptr );
-    if (color_type == PNG_COLOR_TYPE_GRAY ||
-        color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
-        png_set_gray_to_rgb( png_ptr );
-
-	// Force in an alpha channel
-	if ( !( color_type & PNG_COLOR_MASK_ALPHA ) )
+	pResultData = (unsigned char *)malloc( rowbytes * png_height );
+	if ( !pResultData )
 	{
-		png_set_add_alpha(png_ptr, 255, PNG_FILLER_AFTER);
+		png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
+		errcode = CE_MEMORY_ERROR;
+		return NULL;
 	}
-
-  /*
-	double gamma;
-  if (png_get_gAMA(png_ptr, info_ptr, &gamma))
-        png_set_gamma(png_ptr, display_exponent, gamma);
-
-*/
-    /* all transformations have been registered; now update info_ptr data,
-     * get rowbytes and channels, and allocate image memory */
-
-    png_read_update_info( png_ptr, info_ptr );
-
-    rowbytes = png_get_rowbytes( png_ptr, info_ptr );
-    png_byte channels = (int)png_get_channels( png_ptr, info_ptr );
-	if ( channels != 4 )
+	if ( passes > 1 )
+		memset( pResultData, 0, rowbytes * png_height );
+	for ( int pass = 0; pass < passes; ++pass )
 	{
-		Assert( channels == 4 );
-        errcode = CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
-        goto fail;
+		for ( png_uint_32 row = 0; row < png_height; ++row )
+			png_read_row( png_ptr, pResultData + (size_t)row * rowbytes, NULL );
 	}
-
-	row_pointers = (png_bytepp)malloc( height*sizeof(png_bytep) );
-	pResultData = (unsigned char *)malloc( rowbytes*height );
-
-	if ( row_pointers == NULL || pResultData == NULL ) 
-	{
-        errcode = CE_MEMORY_ERROR;
-        goto fail;
-    }
-
-    /* set the individual row_pointers to point at the correct offsets */
-
-    for ( int i = 0;  i < height;  ++i)
-        row_pointers[i] = pResultData + i*rowbytes;
-
-    /* now we can go ahead and just read the whole image */
-
-    png_read_image( png_ptr, row_pointers );
-
-    png_read_end(png_ptr, NULL);
-
-	free( row_pointers );
-	row_pointers = NULL;
-
-	// Clean up
+	png_read_end( png_ptr, NULL );
 	png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
-
-	// OK!
-	width = png_width;
-	height = png_height;
+	width = (int)png_width;
+	height = (int)png_height;
 	errcode = CE_SUCCESS;
 	return pResultData;
-
 #else
 	errcode = CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
 	return NULL;
@@ -1261,6 +1191,11 @@ ConversionErrorType ImgUtl_ConvertTGA(const char *tgaPath, int nMaxWidth/*=-1*/,
 		finalWidth = paddedImageWidth;
 	}
 
+	if ( finalWidth < 1 )
+		finalWidth = 1;
+	if ( finalHeight < 1 )
+		finalHeight = 1;
+
 	unsigned char *resizeBuffer = (unsigned char *)malloc(finalWidth * finalHeight * 4);
 
 	// do the actual stretching
@@ -1540,18 +1475,15 @@ ConversionErrorType ImgUtl_ConvertTGAToVTF(const char *tgaPath, int nMaxWidth/*=
 	vtfParams[2] = "-dontusegamedir";
 	vtfParams[3] = (char *)tgaPath;
 
-	// call vtex to do the conversion.
-	vtex->VTex(4, vtfParams);  // how do we know this works?
-
-	Sys_UnloadModule(vtexmod);
-
-	return CE_SUCCESS;
+	const int result = vtex->VTex( 4, vtfParams );
+	Sys_UnloadModule( vtexmod );
+	return result == 0 ? CE_SUCCESS : CE_ERROR_WRITING_OUTPUT_FILE;
 }
 
-static void DoCopyFile( const char *source, const char *destination )
+static bool DoCopyFile( const char *source, const char *destination )
 {
 #if defined( WIN32 )
-	CopyFile( source, destination, true );
+	return CopyFile( source, destination, false ) != 0;
 #elif defined( OSX )
 	copyfile( source, destination, NULL, COPYFILE_ALL );
 #elif defined( ENGINE_DLL )
@@ -1572,6 +1504,7 @@ static void DoCopyFile( const char *source, const char *destination )
 #else
 	engine->CopyLocalFile( source, destination );
 #endif
+	return true;
 }
 
 static void DoDeleteFile( const char *filename )
@@ -1581,6 +1514,31 @@ static void DoDeleteFile( const char *filename )
 #else
 	unlink( filename );
 #endif
+}
+
+static ConversionErrorType ImgUtl_ConvertPNGToTGA( const char *pngPath, const char *tgaPath )
+{
+	int width = 0, height = 0;
+	ConversionErrorType result;
+	unsigned char *data = ImgUtl_ReadPNGAsRGBA( pngPath, width, height, result );
+	if ( !data )
+		return result;
+	if ( width <= 0 || height <= 0 || width > SHRT_MAX || height > SHRT_MAX ||
+		(size_t)width * height > (size_t)INT_MAX / 32 )
+	{
+		free( data );
+		return CE_SOURCE_FILE_SIZE_NOT_SUPPORTED;
+	}
+	CUtlBuffer output;
+	const bool converted = TGAWriter::WriteToBuffer( data, output, width, height,
+		IMAGE_FORMAT_RGBA8888, IMAGE_FORMAT_RGBA8888 );
+	free( data );
+	if ( !converted || !g_pFullFileSystem->WriteFile( tgaPath, NULL, output ) )
+	{
+		DoDeleteFile( tgaPath );
+		return CE_ERROR_WRITING_OUTPUT_FILE;
+	}
+	return CE_SUCCESS;
 }
 
 ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const char *pMaterialsSubDir, int nMaxWidth/*=-1*/, int nMaxHeight/*=-1*/ )
@@ -1608,6 +1566,8 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 	char tgaPath[MAX_PATH*2];
 	char *c;
 	bool failed = false;
+	char vtfPath[MAX_PATH*2];
+	vtfPath[0] = 0;
 
 	Q_strncpy(tgaPath, pInPath, sizeof(tgaPath));
 
@@ -1628,10 +1588,16 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 
 		//  Look for an empty temp file - find the first one that doesn't exist.
 		int index = 0;
+		char tempVTFPath[MAX_PATH*2], tempTXTPath[MAX_PATH*2];
 		do {
-			Q_snprintf(tgaPath, sizeof(tgaPath), "%stemp%d.tga", origpath, index);
+			if ( index == INT_MAX )
+				return CE_ERROR_WRITING_OUTPUT_FILE;
+			if ( Q_snprintf( tgaPath, sizeof(tgaPath), "%stemp%d.tga", origpath, index ) >= (int)sizeof(tgaPath) ||
+				 Q_snprintf( tempVTFPath, sizeof(tempVTFPath), "%stemp%d.vtf", origpath, index ) >= (int)sizeof(tempVTFPath) ||
+				 Q_snprintf( tempTXTPath, sizeof(tempTXTPath), "%stemp%d.txt", origpath, index ) >= (int)sizeof(tempTXTPath) )
+				return CE_ERROR_WRITING_OUTPUT_FILE;
 			++index;
-		} while (_access(tgaPath, 0) != -1);
+		} while ( _access( tgaPath, 0 ) != -1 || _access( tempVTFPath, 0 ) != -1 || _access( tempTXTPath, 0 ) != -1 );
 
 
 		//  Convert the other formats to TGA
@@ -1669,12 +1635,31 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 		}
 		//  vtf files
 		//
+		else if ( !stricmp( extension, "png" ) )
+		{
+			nErrorCode = ImgUtl_ConvertPNGToTGA( pInPath, tgaPath );
+			deleteIntermediateTGA = nErrorCode == CE_SUCCESS;
+			failed = nErrorCode != CE_SUCCESS;
+		}
 		else if (!stricmp(extension, "vtf"))
 		{
 			// if the file is already in the vtf format there's no need to convert it.
 			convertTGAToVTF = false;
 			
 		}
+		else
+		{
+			return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
+		}
+	}
+
+	Q_strncpy( vtfPath, convertTGAToVTF ? tgaPath : pInPath, sizeof(vtfPath) );
+	if ( convertTGAToVTF )
+	{
+		c = strrchr( vtfPath, '.' );
+		if ( !c )
+			return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
+		Q_strncpy( c + 1, "vtf", sizeof(vtfPath) - ( c + 1 - vtfPath ) );
 	}
 
 	// if we now have a TGA file, convert it to VTF 
@@ -1692,6 +1677,7 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 			Q_strncpy(tempPath, tgaPath, sizeof(tempPath));
 
 			nErrorCode = ImgUtl_ConvertTGAToVTF( tempPath, nMaxWidth, nMaxHeight );
+			deleteIntermediateVTF = deleteIntermediateTGA;
 			if (nErrorCode == CE_SUCCESS)
 			{
 				deleteIntermediateVTF = true;
@@ -1708,35 +1694,10 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 
 	char finalPath[MAX_PATH*2];
 	finalPath[0] = 0;
-	char vtfPath[MAX_PATH*2];
-	vtfPath[0] = 0;
-
 
 	//  If we haven't failed so far, create a VMT to go with this VTF 
 	if (!failed)
 	{
-
-		//  If I had to convert from another filetype (i.e. the original was NOT a .vtf)
-		if ( convertTGAToVTF )
-		{
-
-			Q_strncpy(vtfPath, tgaPath, sizeof(vtfPath));
-
-			// rename the tga file to be a vtf file.
-			c = vtfPath + strlen(vtfPath);
-			while ((c > vtfPath) && (*(c-1) != '.'))
-			{
-				--c;
-			}
-			*c = 0;
-			Q_strncat(vtfPath, "vtf", sizeof(vtfPath), COPY_ALL_CHARACTERS);
-
-		} 
-		else
-		{
-			// We were handed a vtf file originally, so use it.
-			Q_strncpy(vtfPath, pInPath, sizeof(vtfPath));
-		}
 
 		// get the vtfFilename from the path.
 		const char *vtfFilename = pInPath + strlen(pInPath);
@@ -1780,18 +1741,11 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 		// write out the spray VMT file.
 		if ( strcmp(vtfPath, finalPath) )  // If they're not already the same
 		{
-			nErrorCode = ImgUtl_WriteGenericVMT(finalPath, pMaterialsSubDir);
-			if (nErrorCode != CE_SUCCESS)
-			{
-				failed = true;
-			}
-
-			if (!failed)
-			{
-				// copy vtf file to the final location, only if we're not already in vtf
-
-				DoCopyFile( vtfPath, finalPath );
-			}
+			if ( !DoCopyFile( vtfPath, finalPath ) )
+				nErrorCode = CE_ERROR_WRITING_OUTPUT_FILE;
+			else
+				nErrorCode = ImgUtl_WriteGenericVMT( finalPath, pMaterialsSubDir );
+			failed = nErrorCode != CE_SUCCESS;
 		}
 	}
 
