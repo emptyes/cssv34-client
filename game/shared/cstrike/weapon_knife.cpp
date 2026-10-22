@@ -80,6 +80,16 @@ END_NETWORK_TABLE()
 #if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CKnife )
 	DEFINE_PRED_FIELD( m_flSmackTime, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
+	// The delayed impact must come from the same command as its predicted timer.
+	// Restore only the trace values Smack consumes; never save raw pointers.
+	DEFINE_PRED_FIELD( m_bStab, FIELD_BOOLEAN, 0 ),
+	DEFINE_PRED_FIELD( m_pTraceHitEnt, FIELD_EHANDLE, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.startpos, FIELD_VECTOR, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.endpos, FIELD_VECTOR, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.fraction, FIELD_FLOAT, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.surface.flags, FIELD_SHORT, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.surface.surfaceProps, FIELD_SHORT, 0 ),
+	DEFINE_PRED_FIELD( m_trHit.hitbox, FIELD_INTEGER, 0 ),
 END_PREDICTION_DATA()
 #endif
 
@@ -101,6 +111,14 @@ PRECACHE_WEAPON_REGISTER( weapon_knife );
 
 CKnife::CKnife()
 {
+	m_bStab = false;
+	m_trHit.startpos.Init();
+	m_trHit.endpos.Init();
+	m_trHit.fraction = 1.0f;
+	m_trHit.surface.flags = 0;
+	m_trHit.surface.surfaceProps = 0;
+	m_trHit.hitbox = 0;
+	m_trHit.m_pEnt = NULL;
 }
 
 

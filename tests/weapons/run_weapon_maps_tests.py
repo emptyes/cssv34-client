@@ -1,7 +1,7 @@
 """Audit extracted weapon prediction maps with SDK datamap descriptors.
 
-Minimal scalar layout wrappers, not actual weapon instances/CPredictionCopy.
-Tests descriptor types, duplicate names, network flags, and scalar roundtrips.
+Minimal layout wrappers (real SDK trace/handle types for knife), not actual weapon instances/CPredictionCopy.
+Tests descriptor types, duplicate names, network flags, and typed roundtrips; engine prediction copying is not exercised.
 """
 import argparse
 import json
@@ -34,9 +34,14 @@ REQUIRED = {
     'CWeaponG3SG1': {'m_flLastFire': ('float', False)},
     'CWeaponSG550': {'m_flLastFire': ('float', False)},
     'CWeaponM4A1': {'m_bSilencerOn': ('bool', True), 'm_flDoneSwitchingSilencer': ('float', True)},
-    'CKnife': {'m_flSmackTime': ('float', True)},
+    'CKnife': {'m_flSmackTime': ('float', True), 'm_bStab': ('bool', False),
+               'm_pTraceHitEnt': ('EHANDLE', False), 'm_trHit.startpos': ('Vector', False),
+               'm_trHit.endpos': ('Vector', False), 'm_trHit.fraction': ('float', False),
+               'm_trHit.surface.flags': ('unsigned short', False),
+               'm_trHit.surface.surfaceProps': ('short', False), 'm_trHit.hitbox': ('int', False)},
 }
-TYPE = {'float': 'FIELD_FLOAT', 'bool': 'FIELD_BOOLEAN', 'int': 'FIELD_INTEGER'}
+TYPE = {'float': 'FIELD_FLOAT', 'bool': 'FIELD_BOOLEAN', 'int': 'FIELD_INTEGER', 'Vector': 'FIELD_VECTOR',
+        'short': 'FIELD_SHORT', 'unsigned short': 'FIELD_SHORT', 'EHANDLE': 'FIELD_EHANDLE'}
 
 
 def main():
@@ -54,9 +59,9 @@ def main():
         declarations = text + ((p.with_suffix('.h').read_bytes().decode('latin1')) if p.with_suffix('.h').exists() else '')
         for cls, body in re.findall(r'BEGIN_PREDICTION_DATA\s*\(\s*(\w+)\s*\)(.*?)END_PREDICTION_DATA\s*\(\s*\)', text, re.S):
             seen.add(cls)
-            # Client preprocessor guards only; all map fields are scalar in this tree.
+            # Client preprocessor guards only; nested trace fields are audited as well.
             body = re.sub(r'^\s*#.*$', '', body, flags=re.M)
-            fields = list(re.finditer(r'DEFINE_(PRED_FIELD_TOL|PRED_FIELD|FIELD)\s*\(\s*(\w+)\s*,\s*(\w+)([^)]*)\)', body))
+            fields = list(re.finditer(r'DEFINE_(PRED_FIELD_TOL|PRED_FIELD|FIELD)\s*\(\s*([\w.]+)\s*,\s*(\w+)([^)]*)\)', body))
             actual = {}; members = {}
             for f in fields:
                 name, fieldtype, tail = f.group(2, 3, 4)
@@ -65,6 +70,20 @@ def main():
                 network = re.search(r'CNetworkVar\s*\(\s*(bool|float|int)\s*,\s*' + re.escape(name) + r'\s*\)', declarations)
                 plain = re.search(r'\b(bool|float|int)\s+' + re.escape(name) + r'\s*[;=]', declarations)
                 typ = network.group(1) if network else plain.group(1) if plain else None
+                if cls == 'CKnife':
+                    # Check non-scalar declarations against the SDK headers too.
+                    sdk_types = {
+                        'm_pTraceHitEnt': ('EHANDLE', sources / 'weapon_knife.h', r'EHANDLE\s+m_pTraceHitEnt\s*;'),
+                        'm_trHit.startpos': ('Vector', root / 'public/trace.h', r'Vector\s+startpos\s*;'),
+                        'm_trHit.endpos': ('Vector', root / 'public/trace.h', r'Vector\s+endpos\s*;'),
+                        'm_trHit.fraction': ('float', root / 'public/trace.h', r'float\s+fraction\s*;'),
+                        'm_trHit.surface.flags': ('unsigned short', root / 'public/cmodel.h', r'unsigned\s+short\s+flags\s*;'),
+                        'm_trHit.surface.surfaceProps': ('short', root / 'public/cmodel.h', r'short\s+surfaceProps\s*;'),
+                        'm_trHit.hitbox': ('int', root / 'public/gametrace.h', r'int\s+hitbox\s*;'),
+                    }
+                    if name in sdk_types:
+                        typ, header, pattern = sdk_types[name]
+                        assert re.search(pattern, header.read_bytes().decode('latin1')), name
                 if typ is None:
                     # Inherited attack/idle timers explicitly mapped by the CS base.
                     if cls == 'CWeaponCSBase' and name in ('m_flTimeWeaponIdle', 'm_flNextPrimaryAttack', 'm_flNextSecondaryAttack'):
@@ -79,7 +98,11 @@ def main():
                 in_table = bool(re.search(r'SendProp\w+\s*\(\s*SENDINFO\s*\(\s*' + re.escape(name) + r'\s*\)', text))
                 if network != in_table: issues.append(f'{cls}: wrong sendtable flag {name}')
             inventory.append({'file': p.name, 'class': cls, 'fields': list(actual)})
-            lines = [f'struct Layout_{cls} {{'] + [f'    {typ} {name};' for name, typ in members.items()] + ['};']
+            if cls == 'CKnife':
+                lines = ['struct Layout_CKnife { float m_flSmackTime; bool m_bStab;',
+                         'EHANDLE m_pTraceHitEnt; trace_t m_trHit; };']
+            else:
+                lines = [f'struct Layout_{cls} {{'] + [f'    {typ} {name};' for name, typ in members.items()] + ['};']
             lines += [f'void test_{cls}() {{', f'    typedef Layout_{cls} classNameTypedef;', '    typedescription_t desc[] = {',
                       '        { FIELD_VOID, 0, {0,0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0f },', body, '    };',
                       f'    testDescriptors<Layout_{cls}>(desc, sizeof(desc)/sizeof(desc[0]));', '}']
@@ -100,7 +123,7 @@ def main():
         command = [os.environ.get('CXX', 'g++'), '-std=c++11', '-O2', '-g', '-Wall', '-Wextra',
                    '-Wno-unused-local-typedefs', '-Wno-unused-parameter', '-Wno-deprecated-copy',
                    '-DPOSIX', '-DLINUX', '-D_LINUX', '-DGNUC', '-DCOMPILER_GCC', '-DPLATFORM_64BITS',
-                   '-DNO_MALLOC_OVERRIDE', '-isystem', str(root / 'public'), '-I', str(out),
+                   '-DNO_MALLOC_OVERRIDE', '-DCLIENT_DLL', '-I', str(root / 'game/shared'), '-isystem', str(root / 'public/tier0'), '-isystem', str(root / 'public/tier1'), '-isystem', str(root / 'public'), '-I', str(out),
                    str(Path(__file__).with_name('weapon_maps_tests.cpp')), '-o', str(executable)]
         if args.debug: command += ['-O0', '-D_GLIBCXX_ASSERTIONS']
         if args.sanitize: command += ['-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-fno-pie', '-no-pie']
