@@ -21,6 +21,7 @@ BEGIN_NETWORK_TABLE( CWeaponCSBaseGun, DT_WeaponCSBaseGun )
 END_NETWORK_TABLE()
 
 BEGIN_PREDICTION_DATA( CWeaponCSBaseGun )
+	DEFINE_PRED_FIELD( m_zoomFullyActiveTime, FIELD_FLOAT, 0 ),
 END_PREDICTION_DATA()
 
 LINK_ENTITY_TO_CLASS( weapon_csbase_gun, CWeaponCSBaseGun );
