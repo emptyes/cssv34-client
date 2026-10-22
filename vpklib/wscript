@@ -30,7 +30,7 @@ def build(bld):
 
 	defines = []
 
-	libs = []
+	libs = ['libzstd']
 
 	bld.stlib(
 		source   = source,

@@ -10,7 +10,8 @@
 #pragma once
 #endif
 
-
+#include <vector>
+#include <libzstd/zstd.h>
 #include <tier0/platform.h>
 #include <tier0/threadtools.h>
 #include <tier0/tslist.h>
@@ -24,12 +25,12 @@
 #include "tier1/utlmap.h"
 #include "tier1/checksum_md5.h"
 
-//#define VPK_ENABLE_SIGNING
+// VPK with ZStandard Compression (vpk54)
+#define VPK_SUPPORT_COMPRESSION
 
 const int k_nVPKDefaultChunkSize = 200 * 1024 * 1024;
 
 class CPackedStore;
-
 
 struct ChunkHashFraction_t
 {
@@ -70,6 +71,42 @@ public:
 	struct CFileHeaderFixedData *m_pHeaderData;
 	uint8 *m_pDirFileNamePtr;								// pointer to basename in dir block
 
+	std::vector<uint8> m_DecodedData;
+	bool m_bDecoded;
+
+	CPackedStoreFileHandle()
+		: m_nFileNumber(-1),
+		  m_nFileOffset(0),
+		  m_nFileSize(0),
+		  m_nCurrentFileOffset(0),
+		  m_pMetaData(NULL),
+		  m_nMetaDataSize(0),
+		  m_pOwner(NULL),
+		  m_pHeaderData(NULL),
+		  m_pDirFileNamePtr(NULL),
+		  m_bDecoded(false)
+	{
+	}
+
+	~CPackedStoreFileHandle()
+	{
+	}
+
+	void Invalidate() 
+	{
+		m_nFileNumber = -1;
+		m_nFileOffset = 0;
+		m_nFileSize = 0;
+		m_nCurrentFileOffset = 0;
+		m_pMetaData = NULL;
+		m_nMetaDataSize = 0;
+		m_pOwner = NULL;
+		m_pHeaderData = NULL;
+		m_pDirFileNamePtr = NULL;
+		m_DecodedData.clear();
+		m_bDecoded = false;
+	}
+
 	FORCEINLINE operator bool( void ) const
 	{
 		return ( m_nFileNumber != -1 );
@@ -77,24 +114,37 @@ public:
 
 	FORCEINLINE int Read( void *pOutData, int nNumBytes );
 
-	CPackedStoreFileHandle( void )
-	{
-		m_nFileNumber = -1;
-	}
-
 	int Seek( int nOffset, int nWhence )
 	{
-		switch( nWhence )
-		{
-			case SEEK_CUR:
-				nOffset = m_nFileOffset + nOffset ;
-				break;
+		int64 nBase = 0;
 
-			case SEEK_END:
-				nOffset = m_nFileSize + nOffset;
-				break;
+		switch (nWhence)
+		{
+		case SEEK_SET:
+			nBase = 0;
+			break;
+
+		case SEEK_CUR:
+			nBase = m_nCurrentFileOffset;
+			break;
+
+		case SEEK_END:
+			nBase = m_nFileSize;
+			break;
+
+		default:
+			return -1;
 		}
-		m_nCurrentFileOffset = MAX( 0, MIN( m_nFileSize, nOffset ) );
+
+		int64 nTarget = nBase + (int64)nOffset;
+
+		if (nTarget < 0)
+			nTarget = 0;
+
+		if (nTarget > m_nFileSize)
+			nTarget = m_nFileSize;
+
+		m_nCurrentFileOffset = (int)nTarget;
 		return m_nCurrentFileOffset;
 	}
 
@@ -155,6 +205,7 @@ struct VPKContentFileInfo_t
 	uint32 m_iOffsetInChunk;
 	uint32 m_iPreloadSize;
 	const void *m_pPreloadData;
+	uint32 m_nCompressedDataSize;
 	//MD5Value_t m_md5Source; // source content before munging & release optimization.  Used for incremental builds
 	uint32 m_crc; // CRC of actual file contents
 
@@ -165,6 +216,15 @@ struct VPKContentFileInfo_t
 		return m_iTotalSize - m_iPreloadSize;
 	}
 
+	/// Real size of the data in the chunk file.
+	uint32 GetStoredSizeInChunkFile() const
+	{
+		if (m_nCompressedDataSize != 0)
+			return m_nCompressedDataSize;
+
+		return GetSizeInChunkFile();
+	}
+
 	VPKContentFileInfo_t()
 	{
 		m_idxChunk = -1;
@@ -173,6 +233,7 @@ struct VPKContentFileInfo_t
 		m_iPreloadSize = 0;
 		m_crc = 0;
 		m_pPreloadData = NULL;
+		m_nCompressedDataSize = 0;
 		//memset( m_md5Source.bits, 0, sizeof( m_md5Source.bits ) );
 	}
 };
@@ -271,7 +332,7 @@ public:
 class CPackedStore
 {
 public:
-	CPackedStore( char const *pFileBasename, char *pszFName, IBaseFileSystem *pFS, bool bOpenForWrite = false );
+	CPackedStore( char const *pFileBasename, char *pszFName, IBaseFileSystem *pFS, bool bOpenForWrite = false, bool bCompressedWrite = false);
 
 	void RegisterFileTracker( IThreadedFileMD5Processor *pFileTracker ) { m_pFileTracker = pFileTracker; m_PackedStoreReadCache.m_pFileTracker = pFileTracker; }
 
@@ -390,6 +451,11 @@ private:
 	int m_nWriteChunkSize;
 	bool m_bUseDirFile;
 
+	bool m_bCompressed;
+	ZSTD_CDict* m_pCompressionDict;
+	std::vector<uint8> m_CompressionDictData;
+	bool m_bCompressionDictReady;
+
 	IBaseFileSystem *m_pFileSystem;
 	IThreadedFileMD5Processor *m_pFileTracker;
 	CThreadFastMutex m_Mutex;
@@ -459,4 +525,4 @@ FORCEINLINE void CPackedStoreFileHandle::GetPackFileName( char *pchFileNameOut, 
 }
 
 
-#endif // packedtsore_h
+#endif // PACKEDSTORE_H
