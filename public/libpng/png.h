@@ -1,3 +1,9 @@
+// Windows: use the headers of the same libpng 1.6.38 sources that lib/win32/amd64/libpng.lib
+// is built from (old headers here had a different version -> library init failed).
+#if defined(_WIN32) && !defined(ANDROID)
+#include "../../thirdparty/libpng/png.h"
+#else
+
 //========= Copyright Valve Corporation, All rights reserved. ============//
 
 /* png.h - header file for PNG reference library
@@ -2308,3 +2314,5 @@ PNG_EXPORT(207, void, png_save_uint_16, (png_bytep buf, unsigned int i));
 #endif /* PNG_VERSION_INFO_ONLY */
 /* Do not put anything past this line */
 #endif /* PNG_H */
+
+#endif // _WIN32

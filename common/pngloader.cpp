@@ -18,7 +18,6 @@ extern void longjmp( jmp_buf, int ) __attribute__((noreturn));
 #endif
 
 #include "libpng/png.h"
-#include "libpng/pngstruct.h"
 #include "tier0/dbg.h"
 
 //
@@ -42,10 +41,10 @@ struct PngDataStream_t
 // helper function to nibble some more png data from our memory buffer
 void ReadPNGData( png_structp png_ptr, png_bytep outBytes, png_size_t byteCountToRead )
 {
-	if(png_ptr->io_ptr == NULL)
+	if(png_get_io_ptr(png_ptr) == NULL)
 		return;   // we didn't have our mem buffer set
 
-	PngDataStream_t *pData = (PngDataStream_t *)png_ptr->io_ptr;
+	PngDataStream_t *pData = (PngDataStream_t *)png_get_io_ptr(png_ptr);
 
 	if ( byteCountToRead + pData->m_iPNGData > pData->m_cbPNGData )
 		return;

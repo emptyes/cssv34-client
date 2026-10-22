@@ -152,7 +152,13 @@ bool CEngineSoundServer::PrecacheSound( const char *pSample, bool bPreload, bool
 {
 	int		i;
 
-	if ( pSample && TestSoundChar( pSample, CHAR_SENTENCE ) )
+	if ( !pSample || !pSample[0] )
+	{
+		// NULL or empty sound name: nothing to precache (used to crash on NULL)
+		return false;
+	}
+
+	if ( TestSoundChar( pSample, CHAR_SENTENCE ) )
 	{
 		return true;
 	}
