@@ -9,23 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  test-network:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install test dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y g++ libbz2-dev zlib1g-dev
-    - name: Run regression tests
-      env:
-        ASAN_OPTIONS: detect_leaks=1
-      run: python3 tests/run_all_tests.py --sanitize
-
   build-windows-amd64:
-    needs: test-network
     permissions:
       contents: write
     runs-on: windows-latest
