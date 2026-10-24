@@ -531,7 +531,7 @@ int CEngineTrace::GetStatByIndex( int index, bool bClear )
 
 
 
-static void FASTCALL GetBrushesInAABB_ParseLeaf( const Vector *pExtents, CCollisionBSPData *pBSPData, cleaf_t *pLeaf, CUtlVector<int> *pOutput, int iContentsMask, int *pCounters )
+static void FASTCALL GetBrushesInAABB_ParseLeaf( const Vector *pExtents, CCollisionBSPData *pBSPData, cleaf_t *pLeaf, CUtlVector<int> *pOutput, int iContentsMask, unsigned char *pCounters )
 {
 	for( unsigned int i = 0; i != pLeaf->numleafbrushes; ++i )
 	{
@@ -589,9 +589,10 @@ void CEngineTrace::GetBrushesInAABB( const Vector &vMins, const Vector &vMaxs, C
 	int *pLeafList = (int *)stackalloc( pBSPData->numleafs * 2 * sizeof( int ) ); // *2 just in case
 	int iNumLeafs = CM_BoxLeafnums( vMins, vMaxs, pLeafList, pBSPData->numleafs * 2, NULL );
 
-	CUtlVector<int> counters;
+	// Each brush only needs a per-call visited flag, not an integer counter.
+	CUtlVector<unsigned char> counters;
 	counters.SetSize( pBSPData->numbrushes );
-	memset( counters.Base(), 0, pBSPData->numbrushes * sizeof(int) );
+	memset( counters.Base(), 0, pBSPData->numbrushes * sizeof(unsigned char) );
 	for( int i = 0; i != iNumLeafs; ++i )
 		GetBrushesInAABB_ParseLeaf( ptBBoxExtents, pBSPData, &pBSPData->map_leafs[pLeafList[i]], pOutput, iContentsMask, counters.Base() );
 }

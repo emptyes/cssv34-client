@@ -323,15 +323,15 @@ void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCu
 	}
 	else
 	{
-		Vector hitpos;
-
-		VectorMA( pTrace->startpos, pTrace->fraction, dir, hitpos );
+		// endpos already contains the fraction-adjusted impact position.
+		Vector hitpos = pTrace->endpos;
 		VectorNormalize( dir );
 
-		dir *= 4000;  // adjust impact strenght
+		// Keep the physics impulse separate from the normalized FX direction.
+		Vector force = dir * 4000;
 
 		// apply force where we hit it
-		pPhysicsObject->ApplyForceOffset( dir, hitpos );
+		pPhysicsObject->ApplyForceOffset( force, hitpos );
 
 		// Blood spray!
 		FX_CS_BloodSpray( hitpos, dir, 10 );

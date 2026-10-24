@@ -501,7 +501,9 @@ void CNetworkStringTable::UpdateMirrorTable( int tick_ack  )
 
 int CNetworkStringTable::WriteUpdate( CBaseClient *client, bf_write &buf, int tick_ack )
 {
-	CUtlVector< StringHistoryEntry > history;
+	// The wire history is capped at 32 entries; keep its storage local to this call.
+	StringHistoryEntry historyStorage[32];
+	CUtlVector< StringHistoryEntry > history( historyStorage, ARRAYSIZE( historyStorage ) );
 
 	int entriesUpdated = 0;
 	int lastEntry = -1;
@@ -621,7 +623,9 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 {
 	int lastEntry = -1;
 
-	CUtlVector< StringHistoryEntry > history;
+	// The wire history is capped at 32 entries; keep its storage local to this call.
+	StringHistoryEntry historyStorage[32];
+	CUtlVector< StringHistoryEntry > history( historyStorage, ARRAYSIZE( historyStorage ) );
 
 	if ( entries < 0 || buf.IsOverflowed() )
 	{

@@ -262,18 +262,13 @@ public:
 
 	~CCloseCaptionItem( void )
 	{
-		while ( m_Work.Count() > 0 )
-		{
-			CCloseCaptionWorkUnit *unit = m_Work[ 0 ];
-			m_Work.Remove( 0 );
-			delete unit;
-		}
-
+		m_Work.PurgeAndDeleteElements();
 	}
 
 	void SetStream( const wchar_t *stream)
 	{
-		wcsncpy( m_szStream, stream, sizeof( m_szStream ) / sizeof( wchar_t ) );
+		wcsncpy( m_szStream, stream, ARRAYSIZE( m_szStream ) - 1 );
+		m_szStream[ ARRAYSIZE( m_szStream ) - 1 ] = L'\0';
 	}
 
 	const wchar_t *GetStream() const
@@ -963,7 +958,7 @@ void CHudCloseCaption::Paint( void )
 
 	int totalheight = 0;
 	int i;
-	CUtlVector< VisibleStreamItem > visibleitems;
+	CUtlVectorFixedGrowable< VisibleStreamItem, 8 > visibleitems;
 	int c = m_Items.Count();
 	int maxwidth = 0;
 
@@ -998,18 +993,22 @@ void CHudCloseCaption::Paint( void )
 
 		visibleitems.AddToTail( si );
 
-		// Start popping really old items off the stack if we run out of space
+		// Expire the old prefix in order, then shift the surviving items once.
+		int numToRemove = 0;
 		while ( itemheight <= avail_height && 
 				totalheight > avail_height && 
-				visibleitems.Count() > cc_minvisibleitems.GetInt() )
+				visibleitems.Count() - numToRemove > cc_minvisibleitems.GetInt() )
 		{
-			VisibleStreamItem & pop = visibleitems[ 0 ];
+			VisibleStreamItem & pop = visibleitems[ numToRemove ];
 			totalheight -= pop.height;
 
 			// And make it die right away...
 			pop.item->SetTimeToLive( 0.0f );
-
-			visibleitems.Remove( 0 );
+			++numToRemove;
+		}
+		if ( numToRemove )
+		{
+			visibleitems.RemoveMultiple( 0, numToRemove );
 		}	
 	}
 
@@ -1250,47 +1249,46 @@ void CHudCloseCaption::OnTick( void )
 		}
 	}
 
-	// Pass two, remove from head until we get to first item with time remaining
-	bool foundfirstnondeletion = false;
+	// Pass two: delete expired items before the first active item. Keep delayed
+	// items in order and close the resulting gap only once.
+	int nRemoved = 0;
 	for ( i = 0 ; i < c ; ++i )
 	{
 		CCloseCaptionItem *item = m_Items[ i ];
 
-		// Skip items not yet showing...
 		float predisplay = item->GetPreDisplayTime();
 		if ( predisplay > 0.0f )
 		{
+			if ( nRemoved )
+			{
+				m_Items[ i - nRemoved ] = item;
+			}
 			continue;
 		}
 
 		float ttl = item->GetTimeToLive();
 		if ( ttl > 0.0f )
 		{
-			foundfirstnondeletion = true;
-			continue;
-		}
-
-		// Skip the remainder of the items after we find the first/oldest active item
-		if ( foundfirstnondeletion )
-		{
-			continue;
+			break;
 		}
 
 		delete item;
-		m_Items.Remove( i );
-		--i;
-		--c;
+		++nRemoved;
+	}
+
+	if ( nRemoved )
+	{
+		m_Items.RemoveMultiple( i - nRemoved, nRemoved );
 	}
 }
 
 void CHudCloseCaption::Reset( void )
 {
-	while ( m_Items.Count() > 0 )
+	for ( int i = 0; i < m_Items.Count(); ++i )
 	{
-		CCloseCaptionItem *i = m_Items[ 0 ];
-		delete i;
-		m_Items.Remove( 0 );
+		delete m_Items[ i ];
 	}
+	m_Items.RemoveAll();
 
 	ClearAsyncWork();
 	Unlock();
@@ -1299,42 +1297,49 @@ void CHudCloseCaption::Reset( void )
 bool CHudCloseCaption::SplitCommand( wchar_t const **ppIn, wchar_t *cmd, wchar_t *args ) const
 {
 	const wchar_t *in = *ppIn;
-	const wchar_t *oldin = in;
-
 	if ( in[0] != L'<' )
 	{
-		*ppIn += ( oldin - in );
 		return false;
 	}
 
-	args[ 0 ] = 0;
-	cmd[ 0 ]= 0;
-	wchar_t *out = cmd;
-	in++;
-	while ( *in != L'\0' && *in != L':' && *in != L'>' && !isspace( *in ) )
+	// All callers provide 256-character command and argument buffers.
+	const int maxCommandChars = 255;
+	cmd[0] = args[0] = L'\0';
+	const wchar_t *command = ++in;
+	while ( *in != L'\0' && *in != L':' && *in != L'>' && !iswspace( *in ) )
 	{
-		*out++ = *in++;
+		if ( in - command >= maxCommandChars )
+			return false;
+		++in;
 	}
-	*out = L'\0';
-
-	if ( *in != L':' )
+	int commandLength = in - command;
+	if ( *in != L':' && *in != L'>' )
 	{
-		*ppIn += ( in - oldin );
-		return true;
+		// Keep the cursor unchanged: the caller will display malformed text literally.
+		return false;
 	}
 
-	in++;
-	out = args;
-	while ( *in != L'\0' && *in != L'>' )
+	const wchar_t *argument = in;
+	int argumentLength = 0;
+	if ( *in == L':' )
 	{
-		*out++ = *in++;
+		argument = ++in;
+		while ( *in != L'\0' && *in != L'>' )
+		{
+			if ( in - argument >= maxCommandChars )
+				return false;
+			++in;
+		}
+		if ( *in != L'>' )
+			return false;
+		argumentLength = in - argument;
 	}
-	*out = L'\0';
 
-	//if ( *in == L'>' )
-	//	in++;
-
-	*ppIn += ( in - oldin );
+	wcsncpy( cmd, command, commandLength );
+	cmd[commandLength] = L'\0';
+	wcsncpy( args, argument, argumentLength );
+	args[argumentLength] = L'\0';
+	*ppIn = in;
 	return true;
 }
 
@@ -1501,6 +1506,7 @@ void CHudCloseCaption::Process( const wchar_t *stream, float duration, const cha
 
 	wchar_t phrase[ MAX_CAPTION_CHARACTERS ];
 	wchar_t *out = phrase;
+	wchar_t *const phraseEnd = phrase + ARRAYSIZE( phrase ) - 1;
 
 	for ( const wchar_t *curpos = stream; curpos && *curpos != L'\0'; ++curpos )
 	{
@@ -1543,13 +1549,16 @@ void CHudCloseCaption::Process( const wchar_t *stream, float duration, const cha
 			}
 
 			int copychars = curpos - prevpos;
-			while ( --copychars >= 0 )
+			while ( --copychars >= 0 && out < phraseEnd )
 			{
 				*out++ = *prevpos++;
 			}
 		}
 
-		*out++ = *curpos;
+		if ( out < phraseEnd )
+		{
+			*out++ = *curpos;
+		}
 	}
 
 	// End final phrase, if any
@@ -1702,6 +1711,7 @@ void CHudCloseCaption::ComputeStreamWork( int available_width, CCloseCaptionItem
 	int streamlen = wcslen( curpos );
 	CUtlVector< Color > colorStack;
 
+	// Track rendered text, not raw markup, within the current work buffer.
 	const wchar_t *most_recent_space = NULL;
 	int	most_recent_space_w = -1;
 
@@ -1772,6 +1782,12 @@ void CHudCloseCaption::ComputeStreamWork( int available_width, CCloseCaptionItem
 				params.bold = !params.bold;
 			}
 
+			// A formatting command may have finalized and restarted the work buffer.
+			if ( params.out == params.stream )
+			{
+				most_recent_space = NULL;
+				most_recent_space_w = -1;
+			}
 			continue;
 		}
 
@@ -1796,10 +1812,10 @@ void CHudCloseCaption::ComputeStreamWork( int available_width, CCloseCaptionItem
 
 		if ( ( params.x + params.width ) + w > available_width )
 		{
-			if ( most_recent_space && curpos >= most_recent_space + 1 )
+			if ( most_recent_space && params.out >= most_recent_space + 1 )
 			{
 				// Roll back to previous space character if there is one...
-				int goback = curpos - most_recent_space - 1;
+				int goback = params.out - most_recent_space - 1;
 				params.out -= ( goback + 1 );
 				params.width = most_recent_space_w;
 				
@@ -1833,7 +1849,7 @@ void CHudCloseCaption::ComputeStreamWork( int available_width, CCloseCaptionItem
 
 		if ( iswspace( *curpos ) )
 		{
-			most_recent_space = curpos;
+			most_recent_space = params.out - 1;
 			most_recent_space_w = params.width;
 		}
 	}

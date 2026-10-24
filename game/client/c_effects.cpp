@@ -553,7 +553,8 @@ void CClient_Precipitation::CreateWaterSplashes()
 			FX_WaterRipple( vSplash, g_flSplashScale, &g_vSplashColor, g_flSplashLifetime, g_flSplashAlpha );
 		}
 	}
-	m_Splashes.Purge();
+	// Reuse the small splash queue buffer; the vector frees it with the entity.
+	m_Splashes.RemoveAll();
 }
 
 

@@ -1283,10 +1283,17 @@ void CConPanel::AddToNotify( const Color& clr, char const *msg )
 		break;
 	}
 
-	while ( m_NotifyText.Count() > 0 &&
-		( m_NotifyText.Count() >= con_times.GetInt() ) )
+	// Count the same excess prefix without repeatedly shifting the survivors.
+	const int nNotifyCount = m_NotifyText.Count();
+	int nRemoveCount = 0;
+	while ( nNotifyCount - nRemoveCount > 0 &&
+		( nNotifyCount - nRemoveCount >= con_times.GetInt() ) )
 	{
-		m_NotifyText.Remove( 0 );
+		++nRemoveCount;
+	}
+	if ( nRemoveCount )
+	{
+		m_NotifyText.RemoveMultiple( 0, nRemoveCount );
 	}
 }
 

@@ -46,7 +46,8 @@ struct LightVecState_t
 	float*	m_pLightmapT;
 	SurfaceHandle_t m_nSkySurfID;
 	bool	m_bUseLightStyles;
-	CUtlVector<IDispInfo *>	m_LightTestDisps;
+	// Small light-sampling queries keep displacement pointers local; larger lists still grow.
+	CUtlVectorFixedGrowable<IDispInfo *, 8>	m_LightTestDisps;
 };
 
 

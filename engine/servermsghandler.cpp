@@ -567,9 +567,9 @@ void CClientState::ProcessSoundsWithProtoVersion( SVC_Sounds *msg, CUtlVector< S
 	SoundInfo_t defaultSound; defaultSound.SetDefault();
 	SoundInfo_t *pDeltaSound = &defaultSound;
 
-	// Max is 32 in multiplayer and 255 in singleplayer
-	// Reserve this memory up front so it doesn't realloc under pDeltaSound pointing at it
-	sounds.EnsureCapacity( 256 );
+	// Reserve the complete batch before reading deltas: pDeltaSound points into
+	// this vector after the first sound and must remain valid until the loop ends.
+	sounds.EnsureCapacity( sounds.Count() + msg->m_nNumSounds );
 	
 	for ( int i = 0; i < msg->m_nNumSounds; i++ )
 	{

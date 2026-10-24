@@ -58,7 +58,8 @@ struct decalinfo_t
 	Vector		m_Basis[3];
 	void		*m_pUserData;
 	const Vector *m_pNormal;
-	CUtlVector<SurfaceHandle_t>	m_aApplySurfs;
+	// Keep small per-shot surface lists local; larger decals still grow on the heap.
+	CUtlVectorFixedGrowable<SurfaceHandle_t,8>	m_aApplySurfs;
 };
 
 typedef struct
@@ -1266,7 +1267,7 @@ void R_PlayerDecalShoot( IMaterial *material, void *userdata, int entity, const 
 	// it doesn't happen that often.
 	//
 	int i;
-	CUtlVector<decal_t *> decalVec;
+	CUtlVectorFixedGrowable<decal_t *, 8> decalVec;
 
 	for ( i = 0; i<s_aDecalPool.Count(); i++ )
 	{

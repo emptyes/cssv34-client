@@ -775,7 +775,8 @@ void CRopeManager::ResetSegmentCache( int nMaxSegments )
 	if ( nMaxSegments )
 		m_aSegmentCache.EnsureCount( nMaxSegments );
 	else
-		m_aSegmentCache.Purge();
+		// Retain storage for the next render pass; the logical cache is empty.
+		m_aSegmentCache.RemoveAll();
 
 }
 
