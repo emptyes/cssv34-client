@@ -174,7 +174,7 @@ cmodel_t *CM_InlineModelNumber( int index )
 {
 	CCollisionBSPData *pBSPDataData = GetCollisionBSPData();
 
-	if( ( index < 0 ) || ( index > pBSPDataData->numcmodels ) )
+	if( ( index < 0 ) || ( index >= pBSPDataData->numcmodels ) )
 		return NULL;
 
 	return ( &pBSPDataData->map_cmodels[ index ] );

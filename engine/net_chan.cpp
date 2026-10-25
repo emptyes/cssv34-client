@@ -1941,11 +1941,12 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 			
 			int nMsgStartBit = buf.GetNumBitsRead();
 
-			if ( !netmsg->ReadFromBuffer( buf ) )
+			if ( !netmsg->ReadFromBuffer( buf ) || buf.IsOverflowed() )
 			{
 				Log_Msg(LOG_NETCHAN, "Netchannel: failed reading message %s from %s.\n", msgname, remote_address.ToString() );
 				Assert ( 0 );
-				continue;
+				// The remaining payload has no reliable message boundary after a failed read.
+				return false;
 			}
 
 			UpdateMessageStats( netmsg->GetGroup(), buf.GetNumBitsRead() - nMsgStartBit );

@@ -256,9 +256,15 @@ static inline void CL_ParseDeltaHeader( CEntityReadInfo &u )
 #endif
 	SyncTag_Read( u.m_pBuf, "Hdr" );	
 
-	u.m_nNewEntity = u.m_nHeaderBase + 1 + u.m_pBuf->ReadUBitVar();
+	unsigned int delta = u.m_pBuf->ReadUBitVar();
+	if ( u.m_pBuf->IsOverflowed() || u.m_nHeaderBase < -1 || u.m_nHeaderBase >= MAX_EDICTS - 1 ||
+		delta >= (unsigned int)( MAX_EDICTS - u.m_nHeaderBase - 1 ) )
+	{
+		Host_Error( "CL_ParseDeltaHeader: invalid entity index\n" );
+		return;
+	}
 
-
+	u.m_nNewEntity = u.m_nHeaderBase + 1 + (int)delta;
 	u.m_nHeaderBase = u.m_nNewEntity;
 
 	// leave pvs flag
@@ -279,6 +285,11 @@ static inline void CL_ParseDeltaHeader( CEntityReadInfo &u )
 		{
 			u.m_UpdateFlags |= FHDR_DELETE;
 		}
+	}
+	if ( u.m_pBuf->IsOverflowed() )
+	{
+		Host_Error( "CL_ParseDeltaHeader: incomplete entity flags\n" );
+		return;
 	}
 	// Output the bitstream...
 #ifdef DEBUG_NETWORKING

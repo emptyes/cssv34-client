@@ -1043,34 +1043,75 @@ void CollisionBSPData_LoadPhysics( CCollisionBSPData *pBSPData )
 
 	CMapLoadHelper lh( nLoadLump );
 #endif
-	if ( !lh.LumpSize() )
+	int bytesLeft = lh.LumpSize();
+	if ( !bytesLeft )
 		return;
 
 	byte *ptr = lh.LumpBase();
-	byte *basePtr = ptr;
-
-	dphysmodel_t physModel;
-
-	// physics data is variable length.  The last physmodel is a NULL pointer
-	// with modelIndex -1, dataSize -1
-	do
+	if ( bytesLeft < 0 || !ptr )
 	{
+		Host_Error( "CollisionBSPData_LoadPhysics: invalid physics lump\n" );
+		return;
+	}
+
+	// Physics data is variable length. A non-positive dataSize ends the list.
+	while ( true )
+	{
+		if ( bytesLeft < (int)sizeof(dphysmodel_t) )
+		{
+			Host_Error( "CollisionBSPData_LoadPhysics: incomplete model header\n" );
+			return;
+		}
+
+		dphysmodel_t physModel;
 		memcpy( &physModel, ptr, sizeof(physModel) );
 		ptr += sizeof(physModel);
+		bytesLeft -= sizeof(physModel);
 
-		if ( physModel.dataSize > 0 )
-		{
-			cmodel_t *pModel = &pBSPData->map_cmodels[ physModel.modelIndex ];
-			physcollision->VCollideLoad( &pModel->vcollisionData, physModel.solidCount, (const char *)ptr, physModel.dataSize + physModel.keydataSize );
-			ptr += physModel.dataSize;
-			ptr += physModel.keydataSize;
-		}
-		
-		// avoid infinite loop on badly formed file
-		if ( (int)(ptr - basePtr) > lh.LumpSize() )
+		if ( physModel.dataSize <= 0 )
 			break;
 
-	} while ( physModel.dataSize > 0 );
+		// Check ranges by subtraction before adding lengths or indexing models.
+		if ( physModel.modelIndex < 0 || physModel.modelIndex >= pBSPData->numcmodels ||
+			physModel.keydataSize < 0 || physModel.dataSize > bytesLeft ||
+			physModel.keydataSize > bytesLeft - physModel.dataSize ||
+			physModel.solidCount < 0 || physModel.solidCount > 0x7fff )
+		{
+			Host_Error( "CollisionBSPData_LoadPhysics: invalid model range\n" );
+			return;
+		}
+
+		// VCollideLoad trusts each solid's length. Validate the size table first.
+		const byte *solid = ptr;
+		int solidBytesLeft = physModel.dataSize;
+		for ( int i = 0; i < physModel.solidCount; ++i )
+		{
+			if ( solidBytesLeft < (int)sizeof(int) )
+			{
+				Host_Error( "CollisionBSPData_LoadPhysics: incomplete solid size\n" );
+				return;
+			}
+
+			int solidSize;
+			memcpy( &solidSize, solid, sizeof(solidSize) );
+			solid += sizeof(solidSize);
+			solidBytesLeft -= sizeof(solidSize);
+			if ( solidSize <= 0 || solidSize > solidBytesLeft )
+			{
+				Host_Error( "CollisionBSPData_LoadPhysics: invalid solid range\n" );
+				return;
+			}
+
+			solid += solidSize;
+			solidBytesLeft -= solidSize;
+		}
+
+		int modelBytes = physModel.dataSize + physModel.keydataSize;
+		cmodel_t *pModel = &pBSPData->map_cmodels[ physModel.modelIndex ];
+		physcollision->VCollideLoad( &pModel->vcollisionData, physModel.solidCount, (const char *)ptr, modelBytes );
+		ptr += modelBytes;
+		bytesLeft -= modelBytes;
+	}
 }
 
 

@@ -899,8 +899,13 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		{
 			from = NULL; // full update
 
-			classID = buffer.ReadUBitLong( m_nServerClassBits ); // classID 
-		
+			classID = buffer.ReadUBitLong( m_nServerClassBits ); // classID
+			if ( buffer.IsOverflowed() || !m_pServerClasses || classID <= 0 || classID > m_nServerClasses )
+			{
+				DevMsg( "CL_QueueEvent: invalid server class index.\n" );
+				return false;
+			}
+
 			// Look up the client class, etc.
 	
 			// Match the server classes to the client classes.
@@ -925,7 +930,11 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		}
 		else
 		{
-			Assert( ei );
+			if ( !ei || buffer.IsOverflowed() )
+			{
+				DevMsg( "CL_QueueEvent: missing or incomplete previous event.\n" );
+				return false;
+			}
 
 			unsigned int buffer_size = PAD_NUMBER( Bits2Bytes( ei->bits ), 4 );
 			bf_read fromBuf( ei->pData, buffer_size );

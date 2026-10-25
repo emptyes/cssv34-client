@@ -453,7 +453,13 @@ void CMapLoadHelper::Init( model_t *pMapModel, const char *loadname )
 		return;
 	}
 
-	g_pFileSystem->Read( &s_MapHeader, sizeof( dheader_t ), s_MapFileHandle );
+	if ( g_pFileSystem->Read( &s_MapHeader, sizeof( dheader_t ), s_MapFileHandle ) != (int)sizeof( dheader_t ) )
+	{
+		g_pFileSystem->Close( s_MapFileHandle );
+		s_MapFileHandle = FILESYSTEM_INVALID_HANDLE;
+		Host_Error( "CMapLoadHelper::Init, incomplete map header in %s\n", s_szMapName );
+		return;
+	}
 	if ( s_MapHeader.ident != IDBSPHEADER )
 	{
 		g_pFileSystem->Close( s_MapFileHandle );
@@ -515,7 +521,12 @@ void CMapLoadHelper::Init( model_t *pMapModel, const char *loadname )
 
 			// Read the lump header
 			memset( &lumpHeader, 0, sizeof( lumpHeader ) );
-			g_pFileSystem->Read( &lumpHeader, sizeof( lumpfileheader_t ), lumpFile );
+			if ( g_pFileSystem->Read( &lumpHeader, sizeof( lumpfileheader_t ), lumpFile ) != (int)sizeof( lumpfileheader_t ) )
+			{
+				g_pFileSystem->Close( lumpFile );
+				Warning( "Found incomplete lump header in '%s'\n", lumpfilename );
+				continue;
+			}
 
 			if ( lumpHeader.lumpID >= 0 && lumpHeader.lumpID < HEADER_LUMPS )
 			{
@@ -532,6 +543,7 @@ void CMapLoadHelper::Init( model_t *pMapModel, const char *loadname )
 			}
 			else
 			{
+				g_pFileSystem->Close( lumpFile );
 				Warning("Found invalid lump file '%s'. Lump Id: %d\n", lumpfilename, lumpHeader.lumpID );
 			}
 		}
@@ -748,6 +760,18 @@ void CMapLoadHelper::LoadLumpData( int offset, int size, void *pData )
 // Input  : mapfile - 
 //			lumpToLoad - 
 //-----------------------------------------------------------------------------
+// Validate the complete input/output envelope before using the size-less LZMA API.
+static bool Mod_IsValidCompressedLump( const byte *pData, int dataSize, unsigned int outputSize )
+{
+	if ( !pData || dataSize < (int)sizeof(lzma_header_t) || outputSize == 0 || outputSize > INT_MAX )
+		return false;
+
+	lzma_header_t header;
+	V_memcpy( &header, pData, sizeof(header) );
+	return header.id == LZMA_ID && (unsigned int)LittleLong( header.actualSize ) == outputSize &&
+		(unsigned int)LittleLong( header.lzmaSize ) <= (unsigned int)( dataSize - sizeof(header) );
+}
+
 CMapLoadHelper::CMapLoadHelper( int lumpToLoad )
 {
 	if ( lumpToLoad < 0 || lumpToLoad >= HEADER_LUMPS )
@@ -790,58 +814,103 @@ CMapLoadHelper::CMapLoadHelper( int lumpToLoad )
 		return;
 	}
 
+	if ( m_nLumpSize < 0 || m_nLumpOffset < 0 )
+	{
+		Host_Error( "CMapLoadHelper: invalid range for lump %i\n", lumpToLoad );
+		return;
+	}
+
 	if ( s_MapBuffer.Base() )
 	{
-		// bsp is in memory
+		int bufferSize = s_MapBuffer.TellMaxPut();
+		if ( bufferSize < 0 || m_nLumpOffset > bufferSize || m_nLumpSize > bufferSize - m_nLumpOffset )
+		{
+			Host_Error( "CMapLoadHelper: lump %i exceeds map buffer\n", lumpToLoad );
+			return;
+		}
 		m_pData = (unsigned char*)s_MapBuffer.Base() + m_nLumpOffset;
 	}
 	else
 	{
-		if ( s_MapFileHandle == FILESYSTEM_INVALID_HANDLE )
+		if ( fileToUse == FILESYSTEM_INVALID_HANDLE )
 		{
 			Sys_Error( "Can't load map from invalid handle!!!" );
+			return;
 		}
 
-		unsigned nOffsetAlign, nSizeAlign, nBufferAlign;
+		unsigned int fileSize = g_pFileSystem->Size( fileToUse );
+		if ( (unsigned int)m_nLumpOffset > fileSize || (unsigned int)m_nLumpSize > fileSize - m_nLumpOffset )
+		{
+			Host_Error( "CMapLoadHelper: lump %i exceeds map file\n", lumpToLoad );
+			return;
+		}
+
+		unsigned nOffsetAlign = 1, nSizeAlign = 1, nBufferAlign = 1;
 		g_pFileSystem->GetOptimalIOConstraints( fileToUse, &nOffsetAlign, &nSizeAlign, &nBufferAlign );
 
 		bool bTryOptimal = ( m_nLumpOffset % 4 == 0 ); // Don't return badly aligned data
 		unsigned int alignedOffset = m_nLumpOffset;
-		unsigned int alignedBytesToRead = ( ( m_nLumpSize ) ? m_nLumpSize : 1 );
-
+		unsigned int alignedBytesToRead = m_nLumpSize;
 		if ( bTryOptimal )
 		{
-			alignedOffset = AlignValue( ( alignedOffset - nOffsetAlign ) + 1, nOffsetAlign );
-			alignedBytesToRead = AlignValue( ( m_nLumpOffset - alignedOffset ) + alignedBytesToRead, nSizeAlign );
+			if ( !nOffsetAlign || !nSizeAlign )
+			{
+				Host_Error( "CMapLoadHelper: invalid file alignment\n" );
+				return;
+			}
+			alignedOffset = ( alignedOffset / nOffsetAlign ) * nOffsetAlign;
+			uint64 readSize = (uint64)( m_nLumpOffset - alignedOffset ) + m_nLumpSize;
+			readSize = ( ( readSize + nSizeAlign - 1 ) / nSizeAlign ) * nSizeAlign;
+			if ( readSize > INT_MAX )
+			{
+				Host_Error( "CMapLoadHelper: aligned lump %i is too large\n", lumpToLoad );
+				return;
+			}
+			alignedBytesToRead = (unsigned int)readSize;
 		}
 
 		m_pRawData = (byte *)g_pFileSystem->AllocOptimalReadBuffer( fileToUse, alignedBytesToRead, alignedOffset );
-		if ( !m_pRawData && m_nLumpSize )
+		if ( !m_pRawData )
 		{
-			Sys_Error( "Can't load lump %i, allocation of %i bytes failed!!!", lumpToLoad, m_nLumpSize + 1 );
+			Sys_Error( "Can't load lump %i, allocation of %u bytes failed!!!", lumpToLoad, alignedBytesToRead );
+			return;
 		}
 
-		if ( m_nLumpSize )
+		g_pFileSystem->Seek( fileToUse, alignedOffset, FILESYSTEM_SEEK_HEAD );
+		int bytesRead = g_pFileSystem->ReadEx( m_pRawData, alignedBytesToRead, alignedBytesToRead, fileToUse );
+		// Padding may extend past EOF; only the prefix and logical lump must be present.
+		if ( bytesRead < 0 || (unsigned int)bytesRead < ( m_nLumpOffset - alignedOffset ) + (unsigned int)m_nLumpSize )
 		{
-			g_pFileSystem->Seek( fileToUse, alignedOffset, FILESYSTEM_SEEK_HEAD );
-			g_pFileSystem->ReadEx( m_pRawData, alignedBytesToRead, alignedBytesToRead, fileToUse );
-			m_pData = m_pRawData + ( m_nLumpOffset - alignedOffset );
+			g_pFileSystem->FreeOptimalReadBuffer( m_pRawData );
+			m_pRawData = NULL;
+			Host_Error( "CMapLoadHelper: incomplete read of lump %i\n", lumpToLoad );
+			return;
 		}
+		m_pData = m_pRawData + ( m_nLumpOffset - alignedOffset );
 	}
 
 	if ( lump->uncompressedSize != 0 )
 	{
-		// Handle compressed lump -- users of the class see the uncompressed data
-		AssertMsg( CLZMA::IsCompressed( m_pData ),
-		           "Lump claims to be compressed but is not recognized as LZMA" );
-
-		m_nLumpSize = CLZMA::GetActualSize( m_pData );
-		AssertMsg( lump->uncompressedSize == m_nLumpSize,
-		           "Lump header disagrees with lzma header for compressed lump" );
-
-		m_pUncompressedData = (unsigned char *)malloc( m_nLumpSize );
-		CLZMA::Uncompress( m_pData, m_pUncompressedData );
-
+		bool valid = Mod_IsValidCompressedLump( m_pData, m_nLumpSize, lump->uncompressedSize );
+		if ( valid )
+		{
+			m_pUncompressedData = (unsigned char *)malloc( lump->uncompressedSize );
+			valid = m_pUncompressedData && CLZMA::Uncompress( m_pData, m_pUncompressedData ) == (unsigned int)lump->uncompressedSize;
+		}
+		if ( !valid )
+		{
+			free( m_pUncompressedData );
+			m_pUncompressedData = NULL;
+			if ( m_pRawData )
+			{
+				g_pFileSystem->FreeOptimalReadBuffer( m_pRawData );
+				m_pRawData = NULL;
+			}
+			m_pData = NULL;
+			Host_Error( "CMapLoadHelper: failed to decompress lump %i\n", lumpToLoad );
+			return;
+		}
+		m_nLumpSize = lump->uncompressedSize;
 		m_pData = m_pUncompressedData;
 	}
 }
@@ -2741,32 +2810,24 @@ bool Mod_LoadGameLump( int lumpId, void *pOutBuffer, int size )
 
 	byte *pData;
 	bool bIsCompressed = ( g_GameLumpDict[i].flags & GAMELUMPFLAG_COMPRESSED );
-	int dataLength;
-	int outSize;
-	if ( bIsCompressed )
+	unsigned int storedSize = bIsCompressed ? g_GameLumpDict[i].compressedSize : g_GameLumpDict[i].uncompressedSize;
+	unsigned int outputSize = g_GameLumpDict[i].uncompressedSize;
+	if ( !pOutBuffer || size < 0 || outputSize == 0 || outputSize > (unsigned int)size ||
+		storedSize == 0 || storedSize > INT_MAX || g_GameLumpDict[i].offset > INT_MAX )
 	{
-		// lump data length is always original uncompressed size
-		// compressed lump data length is determined from next dictionary entry offset
-		dataLength = g_GameLumpDict[i].compressedSize;
-		outSize = g_GameLumpDict[i].uncompressedSize;
-	}
-	else
-	{
-		dataLength = outSize = g_GameLumpDict[i].uncompressedSize;
-	}
-
-	if ( size < 0 || size < outSize )
-	{
-		// caller must supply a buffer that is large enough to hold the data
 		return false;
 	}
+	int dataLength = (int)storedSize;
+	int outSize = (int)outputSize;
 
 	if ( s_MapBuffer.Base() )
 	{
 		// data is in memory
 		Assert( CMapLoadHelper::GetRefCount() );
 
-		if ( g_GameLumpDict[i].offset + dataLength > (unsigned int)s_MapBuffer.TellMaxPut() )
+		int bufferSize = s_MapBuffer.TellMaxPut();
+		if ( bufferSize < 0 || g_GameLumpDict[i].offset > (unsigned int)bufferSize ||
+			storedSize > (unsigned int)bufferSize - g_GameLumpDict[i].offset )
 		{
 			// out of range
 			Assert( 0 );
@@ -2789,12 +2850,18 @@ bool Mod_LoadGameLump( int lumpId, void *pOutBuffer, int size )
 			return false;
 		}
 
+		unsigned int fileSize = g_pFileSystem->Size( fileHandle );
+		if ( g_GameLumpDict[i].offset > fileSize || storedSize > fileSize - g_GameLumpDict[i].offset )
+		{
+			g_pFileSystem->Close( fileHandle );
+			return false;
+		}
 		g_pFileSystem->Seek( fileHandle, g_GameLumpDict[i].offset, FILESYSTEM_SEEK_HEAD );
 
 		if ( !bIsCompressed )
 		{
 			// read directly into user's buffer
-			bool bOK = ( g_pFileSystem->Read( pOutBuffer, outSize, fileHandle ) > 0 );
+			bool bOK = ( g_pFileSystem->Read( pOutBuffer, outSize, fileHandle ) == outSize );
 			g_pFileSystem->Close( fileHandle );
 			return bOK;
 		}
@@ -2802,7 +2869,12 @@ bool Mod_LoadGameLump( int lumpId, void *pOutBuffer, int size )
 		{
 			// data is compressed, read into temporary
 			pData = (byte *)malloc( dataLength );
-			bool bOK = ( g_pFileSystem->Read( pData, dataLength, fileHandle ) > 0 );
+			if ( !pData )
+			{
+				g_pFileSystem->Close( fileHandle );
+				return false;
+			}
+			bool bOK = ( g_pFileSystem->Read( pData, dataLength, fileHandle ) == dataLength );
 			g_pFileSystem->Close( fileHandle );
 			if ( !bOK )
 			{
@@ -2814,7 +2886,7 @@ bool Mod_LoadGameLump( int lumpId, void *pOutBuffer, int size )
 
 	// We'll fall though to here through here if we're compressed
 	bool bResult = false;
-	if ( !CLZMA::IsCompressed( pData ) || CLZMA::GetActualSize( (unsigned char *)pData ) != g_GameLumpDict[i].uncompressedSize )
+	if ( !Mod_IsValidCompressedLump( pData, dataLength, outputSize ) )
 	{
 		Warning( "Failed loading game lump %i: lump claims to be compressed but metadata does not match\n", lumpId );
 	}
