@@ -2881,7 +2881,8 @@ void CTempEnts::MuzzleFlash_Shotgun_Player( ClientEntityHandle_t hEntity, int at
 	QAngle angles;
 
 	// Get our attachment's transformation matrix
-	FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles );
+	if ( !FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles ) )
+		return;
 
 	pSimple->GetBinding().SetBBox( origin - Vector( 4, 4, 4 ), origin + Vector( 4, 4, 4 ) );
 
@@ -3054,7 +3055,8 @@ void CTempEnts::MuzzleFlash_357_Player( ClientEntityHandle_t hEntity, int attach
 	QAngle angles;
 
 	// Get our attachment's transformation matrix
-	FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles );
+	if ( !FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles ) )
+		return;
 
 	pSimple->GetBinding().SetBBox( origin - Vector( 4, 4, 4 ), origin + Vector( 4, 4, 4 ) );
 
@@ -3140,7 +3142,8 @@ void CTempEnts::MuzzleFlash_Pistol_Player( ClientEntityHandle_t hEntity, int att
 	QAngle angles;
 
 	// Get our attachment's transformation matrix
-	FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles );
+	if ( !FX_GetAttachmentTransform( hEntity, attachmentIndex, &origin, &angles ) )
+		return;
 
 	pSimple->GetBinding().SetBBox( origin - Vector( 4, 4, 4 ), origin + Vector( 4, 4, 4 ) );
 

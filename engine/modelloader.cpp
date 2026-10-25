@@ -711,43 +711,36 @@ int CMapLoadHelper::LumpOffset( int lumpID  )
 //-----------------------------------------------------------------------------
 void CMapLoadHelper::LoadLumpElement( int nElemIndex, int nElemSize, void *pData )
 {
-	if ( !nElemSize || !m_nLumpSize )
+	if ( nElemSize == 0 )
+		return;
+
+	if ( nElemIndex < 0 || nElemSize < 0 || m_nLumpSize < 0 || !m_pData ||
+		nElemSize > m_nLumpSize || nElemIndex > ( m_nLumpSize - nElemSize ) / nElemSize )
 	{
+		Host_Error( "CMapLoadHelper::LoadLumpElement: invalid element %d, size %d, lump size %d\n", nElemIndex, nElemSize, m_nLumpSize );
 		return;
 	}
 
-	// supply from memory
-	if ( nElemIndex * nElemSize + nElemSize <= m_nLumpSize )
-	{
-		V_memcpy( pData, m_pData + nElemIndex * nElemSize, nElemSize );
-	}
-	else
-	{
-		// out of range
-		Assert( 0 );
-	}
+	V_memcpy( pData, m_pData + nElemIndex * nElemSize, nElemSize );
 }
 
 
 //-----------------------------------------------------------------------------
-// Loads one element in a lump.
+// Loads one range in a lump.
 //-----------------------------------------------------------------------------
 void CMapLoadHelper::LoadLumpData( int offset, int size, void *pData )
 {
-	if ( !size || !m_nLumpSize )
+	if ( size == 0 )
+		return;
+
+	if ( offset < 0 || size < 0 || m_nLumpSize < 0 || !m_pData ||
+		offset > m_nLumpSize || size > m_nLumpSize - offset )
 	{
+		Host_Error( "CMapLoadHelper::LoadLumpData: invalid offset %d, size %d, lump size %d\n", offset, size, m_nLumpSize );
 		return;
 	}
 
-	if ( offset + size <= m_nLumpSize )
-	{
-		V_memcpy( pData, m_pData + offset, size );
-	}
-	else
-	{
-		// out of range
-		Assert( 0 );
-	}
+	V_memcpy( pData, m_pData + offset, size );
 }
 
 //-----------------------------------------------------------------------------

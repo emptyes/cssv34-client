@@ -1324,7 +1324,12 @@ bool CNetChan::SendSubChannelData( bf_write &buf )
 
 bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 {
-	dataFragments_t * data = &m_ReceiveList[stream]; // get list
+	dataFragments_t *pReceiveData = &m_ReceiveList[stream];
+	dataFragments_t incoming = {};
+	if ( pReceiveData->buffer )
+		incoming = *pReceiveData;
+	dataFragments_t *data = &incoming;
+	char *pOldBuffer = NULL;
 	int startFragment = 0;
 	int numFragments = 0;
 	unsigned int offset = 0;
@@ -1384,13 +1389,11 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 			data->bytes = buf.ReadUBitLong( MAX_FILE_SIZE_BITS );
 		}
 
-		if ( data->buffer )
-		{
-			// last transmission was aborted, free data
-			delete [] data->buffer;
-			data->buffer = NULL;
-			ConDMsg( "Fragment transmission aborted at %i/%i from %s.\n", data->ackedFragments, data->numFragments, GetAddress() );
-		}
+		if ( buf.IsOverflowed() )
+			return false;
+
+		pOldBuffer = data->buffer;
+		data->buffer = NULL;
 
 		data->bits = data->bytes * 8;
 		data->asTCP = false;
@@ -1412,7 +1415,6 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 			return false;
 		}
 
-		data->buffer = new char[PAD_NUMBER(data->bytes, 4)];
 	}
 	else
 	{
@@ -1445,15 +1447,32 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 	Assert ( (offset + length) <= data->bytes );
 	if ( length == 0 || ( offset + length > data->bytes ) )
 	{
-		delete[] data->buffer;
-		data->buffer = NULL;
 		ConMsg("Malformed fragment ofs %i len %d, buffer size %d from %s\n", offset, length, PAD_NUMBER(data->bytes, 4), remote_address.ToString() );
 		return false;
 	}
 
-	buf.ReadBytes( data->buffer + offset, length ); // read data
+	// Do not commit a fragment or replace the previous transfer on a short packet.
+	if ( buf.IsOverflowed() || buf.GetNumBitsLeft() < (int)( length * 8 ) )
+		return false;
+
+	if ( offset == 0 )
+		data->buffer = new char[PAD_NUMBER(data->bytes, 4)];
+
+	if ( !buf.ReadBytes( data->buffer + offset, length ) )
+	{
+		if ( offset == 0 )
+			delete [] data->buffer;
+		return false;
+	}
+
+	if ( pOldBuffer )
+	{
+		delete [] pOldBuffer;
+		ConDMsg( "Fragment transmission aborted at %i/%i from %s.\n", pReceiveData->ackedFragments, pReceiveData->numFragments, GetAddress() );
+	}
 
 	data->ackedFragments+= numFragments;
+	*pReceiveData = incoming;
 
 	if ( net_showfragments.GetBool() )
 		ConMsg("Received fragments: start %i, num %i\n", startFragment, numFragments );
@@ -2458,6 +2477,9 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 					return; // error while reading fragments, drop whole packet
 			}
 		}
+
+		if ( msg.IsOverflowed() )
+			return;
 
 		// flip subChannel bit to signal successful receiving
 		FLIPBIT(m_nInReliableState, bit);

@@ -10,6 +10,7 @@
 #include "cmodel_engine.h"
 #include "dispcoll_common.h"
 #include "modelloader.h"
+#include "host.h"
 #include "common.h"
 #include "zone.h"
 
@@ -1151,7 +1152,7 @@ void CollisionBSPData_LoadDispInfo( CCollisionBSPData *pBSPData )
             continue;
 
         // get the current displacement build surface
-		if ( pFaces->dispinfo >= coreDispCount )
+		if ( pFaces->dispinfo < 0 || pFaces->dispinfo >= coreDispCount )
 			continue;
 
 		pDispIndexToFaceIndex[pFaces->dispinfo] = (unsigned short)i;
@@ -1181,6 +1182,12 @@ void CollisionBSPData_LoadDispInfo( CCollisionBSPData *pBSPData )
 		// Load up the dispinfo and create the CCoreDispInfo from it.
 		ddispinfo_t dispInfo;
 		lhDispInfo.LoadLumpElement( i, sizeof(ddispinfo_t), &dispInfo );
+
+		if ( dispInfo.power < MIN_MAP_DISP_POWER || dispInfo.power > MAX_MAP_DISP_POWER )
+		{
+			Host_Error( "CollisionBSPData_LoadDispInfo: invalid displacement power (%d)\n", dispInfo.power );
+			return;
+		}
 
 		// Read in the vertices.
 		int nVerts = NUM_DISP_POWER_VERTS( dispInfo.power );

@@ -115,19 +115,20 @@ void FX_RicochetSound( const Vector& pos )
 //-----------------------------------------------------------------------------
 bool FX_GetAttachmentTransform( ClientEntityHandle_t hEntity, int attachmentIndex, Vector *origin, QAngle *angles )
 {
+	// Leave deterministic outputs on every failure path.
+	if ( origin != NULL )
+	{
+		*origin = vec3_origin;
+	}
+
+	if ( angles != NULL )
+	{
+		*angles = QAngle(0,0,0);
+	}
+
 	// Validate our input
 	if ( ( hEntity == INVALID_EHANDLE_INDEX ) || ( attachmentIndex < 1 ) )
 	{
-		if ( origin != NULL )
-		{
-			*origin = vec3_origin;
-		}
-		
-		if ( angles != NULL )
-		{
-			*angles = QAngle(0,0,0);
-		}
-
 		return false;
 	}
 
@@ -139,7 +140,8 @@ bool FX_GetAttachmentTransform( ClientEntityHandle_t hEntity, int attachmentInde
 		QAngle attachAngles;
 
 		// Find the attachment's matrix
-		pRenderable->GetAttachment( attachmentIndex, attachOrigin, attachAngles );
+		if ( !pRenderable->GetAttachment( attachmentIndex, attachOrigin, attachAngles ) )
+			return false;
 	
 		if ( origin != NULL )
 		{
