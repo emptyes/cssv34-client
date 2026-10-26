@@ -1511,7 +1511,8 @@ Vector Color32ToVector( const color32 &color )
 
 int	C_QuadraticBeam::DrawModel( int )
 {
-	Draw_SetSpriteTexture( GetModel(), 0, GetRenderMode() );
+	if ( !Draw_SetSpriteTexture( GetModel(), 0, GetRenderMode() ) )
+		return 0;
 	Vector color = Color32ToVector( GetRenderColor() );
 	DrawBeamQuadratic( GetRenderOrigin(), m_controlPosition, m_targetPosition, m_flWidth, color, gpGlobals->curtime*m_scrollRate );
 	return 1;
