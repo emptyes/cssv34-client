@@ -775,7 +775,7 @@ void CRopeManager::ResetSegmentCache( int nMaxSegments )
 	if ( nMaxSegments )
 		m_aSegmentCache.EnsureCount( nMaxSegments );
 	else
-		m_aSegmentCache.Purge();
+		m_aSegmentCache.RemoveAll();
 
 }
 
