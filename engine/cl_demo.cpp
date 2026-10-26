@@ -1318,7 +1318,9 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 	
 	int inseq, outseqack, outseq = 0;
 
-	m_DemoFile.ReadCmdInfo( m_LastCmdInfo );
+	democmdinfo_t info;
+	m_DemoFile.ReadCmdInfo( info );
+	StoreDemoCommandInfo( tick, info );
 
 	m_DemoFile.ReadSequenceInfo( inseq, outseqack );
 	cl.m_NetChannel->SetSequenceData( outseq, inseq, outseqack );
@@ -1380,6 +1382,23 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 	return &m_DemoPacket;
 }
 
+void CDemoPlayer::StoreDemoCommandInfo( int tick, const democmdinfo_t& info )
+{
+	if ( !m_bHasLastCmdInfoTick || m_nLastCmdInfoTick != tick )
+	{
+		m_nLastCmdInfoTick = tick;
+		m_bHasLastCmdInfoTick = true;
+		m_bLastCmdInfoTickHasFlags = false;
+		m_LastCmdInfo = info;
+	}
+
+	m_bLastCmdInfoTickHasFlags |= info.flags != FDEMO_NORMAL;
+	if ( m_bLastCmdInfoTickHasFlags )
+	{
+		m_LastCmdInfo = info;
+	}
+}
+
 void CDemoPlayer::InterpolateDemoCommand( int targettick, DemoCommandQueue& prev, DemoCommandQueue& next )
 {
 	CUtlVector< DemoCommandQueue >& list = m_DestCmdInfo;
@@ -1412,7 +1431,17 @@ void CDemoPlayer::InterpolateDemoCommand( int targettick, DemoCommandQueue& prev
 			}
 			else
 			{
-				prev = *entry1;
+				int first = i;
+				for ( int j = i; j >= 0 && list[ j ].tick == entry1->tick; --j )
+				{
+					if ( list[ j ].info.flags != FDEMO_NORMAL )
+					{
+						first = i;
+						break;
+					}
+					first = j;
+				}
+				prev = list[ first ];
 				next = *entry2;
 			}
 			return;
@@ -1625,6 +1654,9 @@ CDemoPlayer::CDemoPlayer()
 	m_SnapshotFilename[0] = 0;
 	m_bResetInterpolation = false;
 	m_nPreviousTick = 0;
+	m_nLastCmdInfoTick = 0;
+	m_bHasLastCmdInfoTick = false;
+	m_bLastCmdInfoTickHasFlags = false;
 	m_nEndTick = 0;
 }
 
@@ -1925,6 +1957,7 @@ int CDemoPlayer::GetPlaybackTick( void )
 
 void CDemoPlayer::ResyncDemoClock()
 {
+	m_bHasLastCmdInfoTick = false;
 	m_nStartTick = host_tickcount;
 	m_nPreviousTick = m_nStartTick;
 }
