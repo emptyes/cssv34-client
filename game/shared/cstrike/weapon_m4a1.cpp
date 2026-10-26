@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Â© 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -80,6 +80,10 @@ BEGIN_NETWORK_TABLE( CWeaponM4A1, DT_WeaponM4A1 )
 END_NETWORK_TABLE()
 
 BEGIN_PREDICTION_DATA( CWeaponM4A1 )
+#ifdef CLIENT_DLL
+	DEFINE_PRED_FIELD( m_bSilencerOn, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD_TOL( m_flDoneSwitchingSilencer, FIELD_FLOAT, FTYPEDESC_INSENDTABLE, TD_MSECTOLERANCE ),
+#endif
 END_PREDICTION_DATA()
 
 LINK_ENTITY_TO_CLASS( weapon_m4a1, CWeaponM4A1 );
