@@ -1490,6 +1490,24 @@ void CParticleMgr::PostRender()
 }
 
 
+int CParticleMgr::GetDrawAfterTranslucentsEffects( CParticleEffectBinding **ppEffects, int nMaxEffects )
+{
+	int nCount = 0;
+	FOR_EACH_LL( m_Effects, i )
+	{
+		if ( nCount >= nMaxEffects )
+			break;
+
+		CParticleEffectBinding *pEffect = m_Effects[i];
+		if ( pEffect->GetRemoveFlag() || !pEffect->GetDrawAfterTranslucents() || !pEffect->m_nActiveParticles )
+			continue;
+
+		ppEffects[nCount++] = pEffect;
+	}
+
+	return nCount;
+}
+
 void CParticleMgr::DrawBeforeViewModelEffects()
 {
 	// NOTE (2012/11/27, TomF) - this whole system seems to be deprecated - nothing ever checks these flags, and CParticleMgr::DrawBeforeViewModelEffects is never called by anything!
