@@ -33,7 +33,10 @@ public:
 	int GetWidth() { return m_width; }
 	int GetHeight() { return m_height; }
 	int GetNumFrames() { return m_numFrames; }
-	IMaterial *GetMaterial( RenderMode_t nRenderMode ) { return m_material[nRenderMode]; }
+	IMaterial *GetMaterial( RenderMode_t nRenderMode )
+	{
+		return (unsigned int)nRenderMode < kRenderModeCount ? m_material[nRenderMode] : NULL;
+	}
 	IMaterial *GetMaterial( RenderMode_t nRenderMode, int nFrame );
 	void SetFrame( RenderMode_t nRenderMode, int nFrame );
 	bool Init( const char *name );
