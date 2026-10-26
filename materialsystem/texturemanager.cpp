@@ -981,6 +981,8 @@ struct AsyncReadJob_t
 		}
 
 		SafeRelease( &m_pAsyncMap );
+		SafeRelease( &m_pAsyncRead );
+		SafeRelease( &m_pSrcRt );
 	}
 
 };
@@ -1197,6 +1199,7 @@ public:
 				
 				if ( pMapped->m_pAsyncMap->IsSignalled() )
 				{
+					m_queuedMaps.RemoveAtHead();
 					if ( pMapped->m_pAsyncMap->m_pMemory != 0 && pMapped->m_pAsyncMap->m_nPitch != 0 )
 					{
 						// Stick it in the queue for the other thread to work on it.
@@ -1206,10 +1209,12 @@ public:
 					{
 						Assert( !"Failed to perform a map that shouldn't fail, need to deal with this if it ever happens." );
 						DevWarning( "Failed to perform a map that shouldn't fail, need to deal with this if it ever happens." );
+						if ( !pMapped->m_pAsyncMap->m_pMemory )
+						{
+							SafeRelease( &pMapped->m_pAsyncMap );
+						}
+						delete pMapped;
 					}
-					
-					// Remove the head, which is pMapped
-					m_queuedMaps.RemoveAtHead();
 				}
 
 				// Stop as soon as we complete one, regardless of success.
@@ -2693,6 +2698,7 @@ void CTextureManager::AsyncReadTexture( AsyncReadJob_t* pJob )
 	if ( !pJob->m_pSysmemTex )
 	{
 		Assert( !"Need to deal with this error case" ); // TODOERROR
+		delete pJob;
 		return;
 	}
 
