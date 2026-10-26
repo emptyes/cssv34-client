@@ -116,9 +116,9 @@ private:
 	void ClearAllShakes();
 	screenshake_t *FindLongestShake();
 
-	CUtlVector<screenfade_t *>	m_FadeList;
+	CUtlVectorFixedGrowable<screenfade_t *, 8>	m_FadeList;
 
-	CUtlVector<screenshake_t *>	m_ShakeList;
+	CUtlVectorFixedGrowable<screenshake_t *, MAX_SHAKES>	m_ShakeList;
 	Vector m_vecShakeAppliedOffset;
 	float m_flShakeAppliedAngle;
 
@@ -394,7 +394,7 @@ screenshake_t *CViewEffects::FindLongestShake()
 //-----------------------------------------------------------------------------
 void CViewEffects::Shake( ScreenShake_t &data )
 {
-	if ( ( data.command == SHAKE_START || data.command == SHAKE_START_RUMBLEONLY ) && ( m_ShakeList.Count() < MAX_SHAKES ) )
+	if ( ( data.command == SHAKE_START || data.command == SHAKE_START_RUMBLEONLY || data.command == SHAKE_START_NORUMBLE ) && ( m_ShakeList.Count() < MAX_SHAKES ) )
 	{
 		screenshake_t *pNewShake = new screenshake_t;
 			
@@ -402,6 +402,8 @@ void CViewEffects::Shake( ScreenShake_t &data )
 		pNewShake->frequency = data.frequency;
 		pNewShake->duration = data.duration;
 		pNewShake->nextShake = 0;
+		pNewShake->offset.Init( 0, 0, 0 );
+		pNewShake->angle = 0;
 		pNewShake->endtime = gpGlobals->curtime + data.duration;
 		pNewShake->command = data.command;
 
@@ -514,8 +516,12 @@ void CViewEffects::FadeCalculate( void )
 				s_nCallbackParameter = 0;
 			}
 
-			// Remove this Fade from the list
-			m_FadeList.FindAndRemove( pFade );
+			// A fade-done callback may have changed the list. Use the known index
+			// only while it still identifies this fade; otherwise preserve the lookup.
+			if ( i < m_FadeList.Count() && m_FadeList[i] == pFade )
+				m_FadeList.Remove( i );
+			else
+				m_FadeList.FindAndRemove( pFade );
 			delete pFade;
 		}
 	}
@@ -584,8 +590,8 @@ void CViewEffects::ClearPermanentFades( void )
 
 		if ( pFade->Flags & FFADE_STAYOUT )
 		{
-			// Destroy this fade
-			m_FadeList.FindAndRemove( pFade );
+			// No callbacks run here; the current index still identifies this fade.
+			m_FadeList.Remove( i );
 			delete pFade;
 		}
 	}
