@@ -33,6 +33,7 @@ class CHudScope : public vgui::Panel, public CHudElement
 
 public:
 			CHudScope( const char *pElementName );
+			~CHudScope();
 	
 	void	Init( void );
 	void	LevelInit( void );
@@ -62,6 +63,19 @@ CHudScope::CHudScope( const char *pElementName ) : CHudElement(pElementName), Ba
 	SetParent( pParent );
 	
 	SetHiddenBits( HIDEHUD_PLAYERDEAD );
+	m_iScopeArcTexture = -1;
+	m_iScopeDustTexture = -1;
+}
+
+CHudScope::~CHudScope()
+{
+	if ( vgui::surface() )
+	{
+		if ( m_iScopeArcTexture != -1 )
+			vgui::surface()->DestroyTextureID( m_iScopeArcTexture );
+		if ( m_iScopeDustTexture != -1 )
+			vgui::surface()->DestroyTextureID( m_iScopeDustTexture );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -69,10 +83,12 @@ CHudScope::CHudScope( const char *pElementName ) : CHudElement(pElementName), Ba
 //-----------------------------------------------------------------------------
 void CHudScope::Init( void )
 {
-	m_iScopeArcTexture = vgui::surface()->CreateNewTextureID();
+	if ( m_iScopeArcTexture == -1 )
+		m_iScopeArcTexture = vgui::surface()->CreateNewTextureID();
 	vgui::surface()->DrawSetTextureFile(m_iScopeArcTexture, "sprites/scope_arc", true, false);
 
-	m_iScopeDustTexture = vgui::surface()->CreateNewTextureID();
+	if ( m_iScopeDustTexture == -1 )
+		m_iScopeDustTexture = vgui::surface()->CreateNewTextureID();
 	vgui::surface()->DrawSetTextureFile(m_iScopeDustTexture, "overlays/scope_lens", true, false);
 }
 
