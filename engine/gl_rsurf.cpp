@@ -801,7 +801,6 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 	int meshMap[MAX_VERTEX_FORMAT_CHANGES];
 	CUtlVectorFixedGrowable<batchlist_t, 512> batchList;
 	CUtlVectorFixedGrowable<const surfacesortgroup_t *, 8> dynamicGroups;
-	bool bWarn = true;
 #ifdef NEWMESH
 	CIndexBufferBuilder indexBufferBuilder;
 #else
@@ -858,8 +857,9 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 			{
 				if ( numIndex > nMaxIndices )
 				{
-					DevMsg("Too many faces with the same material in scene!\n");
-					break;
+					// Draw this group surface-by-surface without abandoning later groups.
+					dynamicGroups.AddToTail( &group );
+					continue;
 				}
 
 #ifdef NEWMESH
@@ -895,12 +895,13 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 				}
 				else
 				{
-					if ( bWarn )
-					{
-						Warning( "Too many vertex format changes in frame, whole world not rendered\n" );
-						bWarn = false;
-					}
-					continue;
+					// Flush this index batch, then retry the current group without dropping it.
+#ifdef NEWMESH
+					pLastVertexBuffer = NULL;
+#else
+					pLastMesh = NULL;
+#endif
+					break;
 				}
 			}
 
@@ -909,7 +910,7 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 			batch.firstIndex = indexCount;
 			batch.surfID = surfID;
 			batch.numIndex = numIndex;
-			Assert( indexCount + batch.numIndex < nMaxIndices );
+			Assert( indexCount + batch.numIndex <= nMaxIndices );
 			indexCount += batch.numIndex;
 
 			meshList[meshIndex].numbatches++;
@@ -1868,7 +1869,7 @@ static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned
 	}
 
 	int g;
-	CUtlVector<const surfacesortgroup_t *> alphatestedGroups;
+	CUtlVectorFixedGrowable<const surfacesortgroup_t *, 16> alphatestedGroups;
 
 	const CMSurfaceSortList &sortList = pRenderList->m_SortList;
 	for ( g = 0; g < MAX_MAT_SORT_GROUPS; ++g )
@@ -2369,11 +2370,7 @@ void Shader_DrawTranslucentSurfaces( IWorldRenderList *pRenderListIn, int sortIn
 
 		surfaceList.RemoveAll();
 		surfaceList.EnsureCapacity(dispGroup.surfaceCount);
-		MSL_FOREACH_SURFACE_IN_GROUP_BEGIN(pRenderList->m_DispAlphaSortList, dispGroup, surfID)
-		{
-			surfaceList.AddToTail(surfID);
-		}
-		MSL_FOREACH_SURFACE_IN_GROUP_END()
+		pRenderList->m_DispAlphaSortList.GetSurfaceListForGroup( surfaceList, dispGroup );
 
 		DispInfo_RenderList( i, surfaceList.Base(), surfaceList.Count(), g_EngineRenderer->ViewGetCurrent().m_bOrtho, flags, DEPTH_MODE_NORMAL );
 	}
@@ -3675,8 +3672,8 @@ public:
 	// a batch is a list of surfaces with the same material - they can be drawn with one call to the materialsystem
 	struct transbatch_t
 	{
-		short	firstSurface;
-		short	surfaceCount;
+		int	firstSurface;
+		int	surfaceCount;
 		IMaterial *pMaterial;
 		int		sortID;
 		int		indexCount;
@@ -3693,10 +3690,10 @@ public:
 	// from the next node may be appended to this one to improve performance without causing sorting errors.
 	struct transnode_t
 	{
-		short			firstBatch;
-		short			batchCount;
-		short			firstDecalSurface;
-		short			decalSurfaceCount;
+		int			firstBatch;
+		int			batchCount;
+		int			firstDecalSurface;
+		int			decalSurfaceCount;
 	};
 
 	// This is the top-level struct containing all data necessary to render a translucent brush model in optimal order.
@@ -3704,16 +3701,16 @@ public:
 	// the view usually changes.
 	struct transrender_t
 	{
-		transnode_t		nodes[MAX_TRANS_NODES];
-		SurfaceHandle_t	surfaces[MAX_TRANS_SURFACES];
-		SurfaceHandle_t	decalSurfaces[MAX_TRANS_DECALS];
-		transbatch_t	batches[MAX_TRANS_BATCHES];
+		CUtlVectorFixedGrowable<transnode_t, MAX_TRANS_NODES> nodes;
+		CUtlVectorFixedGrowable<SurfaceHandle_t, MAX_TRANS_SURFACES> surfaces;
+		CUtlVectorFixedGrowable<SurfaceHandle_t, MAX_TRANS_DECALS> decalSurfaces;
+		CUtlVectorFixedGrowable<transbatch_t, MAX_TRANS_BATCHES> batches;
 		transbatch_t	*pLastBatch;	// These are used to append surfaces to existing batches across nodes.
 		transnode_t		*pLastNode;		// This improves performance.
-		short			nodeCount;
-		short			batchCount;
-		short			surfaceCount;
-		short			decalSurfaceCount;
+		int			nodeCount;
+		int			batchCount;
+		int			surfaceCount;
+		int			decalSurfaceCount;
 	};
 
 	// Builds a transrender_t, then executes it's drawing commands
@@ -3734,25 +3731,23 @@ public:
 	void AddSurfaceToBatch( transrender_t &renderT, transnode_t *pNode, transbatch_t *pBatch, SurfaceHandle_t surfID )
 	{
 		pBatch->surfaceCount++;
-		Assert( renderT.surfaceCount < MAX_TRANS_SURFACES);
 
 		pBatch->indexCount += (MSurf_VertCount( surfID )-2)*3;
-		renderT.surfaces[renderT.surfaceCount] = surfID;
+		renderT.surfaces.AddToTail( surfID );
 		renderT.surfaceCount++;
 		if ( SurfaceHasDecals( surfID ) )
 		{
-			Assert( renderT.decalSurfaceCount < MAX_TRANS_DECALS);
 			pNode->decalSurfaceCount++;
-			renderT.decalSurfaces[renderT.decalSurfaceCount] = surfID;
+			renderT.decalSurfaces.AddToTail( surfID );
 			renderT.decalSurfaceCount++;
 		}
 	}
 
 	void AddTransNode( transrender_t &renderT )
 	{
-		renderT.pLastNode = &renderT.nodes[renderT.nodeCount];
+		int nodeIndex = renderT.nodes.AddToTail();
+		renderT.pLastNode = &renderT.nodes[nodeIndex];
 		renderT.nodeCount++;
-		Assert( renderT.nodeCount < MAX_TRANS_NODES);
 		renderT.pLastBatch = NULL;
 		renderT.pLastNode->firstBatch = renderT.batchCount;
 		renderT.pLastNode->firstDecalSurface = renderT.decalSurfaceCount;
@@ -3762,8 +3757,8 @@ public:
 
 	void AddTransBatch( transrender_t &renderT, SurfaceHandle_t surfID )
 	{
-		transbatch_t &batch = renderT.batches[renderT.pLastNode->firstBatch + renderT.pLastNode->batchCount];
-		Assert( renderT.batchCount < MAX_TRANS_BATCHES);
+		int batchIndex = renderT.batches.AddToTail();
+		transbatch_t &batch = renderT.batches[batchIndex];
 		renderT.pLastNode->batchCount++;
 		renderT.batchCount++;
 		batch.firstSurface = renderT.surfaceCount;
@@ -3802,7 +3797,7 @@ public:
 		BuildTransLists_r( renderT, model, node->children[!side]);
 
 		// emit all surfaces on node
-		CUtlVectorFixed<surfacelist_t, 256> sortList;
+		CUtlVectorFixedGrowable<surfacelist_t, 256> sortList;
 		SurfaceHandle_t surfID = SurfaceHandleFromIndex( node->firstsurface, model->brush.pShared );
 		for ( int i = 0; i < node->numsurfaces; i++, surfID++ )
 		{
@@ -4040,7 +4035,7 @@ void CBrushBatchRender::ClearRenderHandles( void )
 {
 	for ( int iBrush = 1 ; iBrush < host_state.worldbrush->numsubmodels ; ++iBrush )
 	{
-		char szBrushModel[5]; // inline model names "*1", "*2" etc
+		char szBrushModel[16]; // inline model names "*1", "*2" etc
 		Q_snprintf( szBrushModel, sizeof( szBrushModel ), "*%i", iBrush );
 		model_t *pModel = modelloader->GetModelForName( szBrushModel, IModelLoader::FMODELLOADER_SERVER );	
 		if ( pModel )
@@ -4073,6 +4068,7 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 	renderT.totalVertexCount = 0;
 
 	CUtlVector<cplane_t *>	planeList;
+	int lastPlaneIndex = -1;
 	CUtlVector<surfacelist_t> surfaceList;
 
 	int i;
@@ -4085,11 +4081,13 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 			continue;
 
 		cplane_t *plane = surfID->plane;
-		int planeIndex = planeList.Find(plane);
+		int planeIndex = ( lastPlaneIndex >= 0 && planeList[lastPlaneIndex] == plane )
+			? lastPlaneIndex : planeList.Find(plane);
 		if ( planeIndex == -1 )
 		{
 			planeIndex = planeList.AddToTail( plane );
 		}
+		lastPlaneIndex = planeIndex;
 		surfacelist_t tmp;
 		tmp.surfID = surfID;
 		tmp.surfaceIndex = i;
@@ -4114,9 +4112,9 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 	IMesh *pLastMesh = NULL;
 #endif
 	brushrendermesh_t *pMesh = NULL;
-	brushrendermesh_t tmpMesh[MAX_VERTEX_FORMAT_CHANGES];
+	CUtlVectorFixedGrowable<brushrendermesh_t, MAX_VERTEX_FORMAT_CHANGES> tmpMesh;
 	brushrenderbatch_t *pBatch = NULL;
-	brushrenderbatch_t tmpBatch[128];
+	CUtlVectorFixedGrowable<brushrenderbatch_t, 128> tmpBatch;
 
 	for ( i = 0; i < surfaceList.Count(); i++ )
 	{
@@ -4131,7 +4129,7 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 		if ( g_WorldStaticMeshes[sortID] != pLastMesh )
 #endif
 		{
-			pMesh = tmpMesh + meshCount;
+			pMesh = &tmpMesh[tmpMesh.AddToTail()];
 			pMesh->firstBatch = batchCount;
 			pMesh->batchCount = 0;
 			lastSortID = -1; // force a new batch
@@ -4139,7 +4137,7 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 		}
 		if ( sortID != lastSortID )
 		{
-			pBatch = tmpBatch + batchCount;
+			pBatch = &tmpBatch[tmpBatch.AddToTail()];
 			pBatch->firstSurface = i;
 			pBatch->surfaceCount = 0;
 			pBatch->sortID = sortID;
@@ -4163,10 +4161,10 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 	}
 
 	renderT.pMeshes = new brushrendermesh_t[meshCount];
-	memcpy( renderT.pMeshes, tmpMesh, sizeof(brushrendermesh_t) * meshCount );
+	memcpy( renderT.pMeshes, tmpMesh.Base(), sizeof(brushrendermesh_t) * meshCount );
 	renderT.meshCount = meshCount;
 	renderT.pBatches = new brushrenderbatch_t[batchCount];
-	memcpy( renderT.pBatches, tmpBatch, sizeof(brushrenderbatch_t) * batchCount );
+	memcpy( renderT.pBatches, tmpBatch.Base(), sizeof(brushrenderbatch_t) * batchCount );
 	renderT.batchCount = batchCount;
 	return &renderT;
 }
@@ -4197,8 +4195,8 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 	}
 
 	void *pProxyData = baseentity ? baseentity->GetClientRenderable() : NULL;
-	bool backface[1024];
-	Assert( pRender->planeCount < 1024 );
+	CUtlVectorFixedGrowable<bool, 1024> backface;
+	backface.SetCount( pRender->planeCount );
 
 	// NOTE: Backface culling is almost no perf gain.  Can be removed from brush model rendering.
 	// Check the shared planes once
