@@ -46,7 +46,7 @@ struct LightVecState_t
 	float*	m_pLightmapT;
 	SurfaceHandle_t m_nSkySurfID;
 	bool	m_bUseLightStyles;
-	CUtlVector<IDispInfo *>	m_LightTestDisps;
+	CUtlVectorFixedGrowable<IDispInfo *, 8>	m_LightTestDisps;
 };
 
 
