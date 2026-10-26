@@ -4620,6 +4620,8 @@ C_BaseAnimating *C_BaseAnimating::BecomeRagdollOnClient()
 	MoveToLastReceivedPosition( true );
 	GetAbsOrigin();
 	C_BaseAnimating *pRagdoll = CreateRagdollCopy();
+	if ( !pRagdoll )
+		return NULL;
 
 	matrix3x4_t boneDelta0[MAXSTUDIOBONES];
 	matrix3x4_t boneDelta1[MAXSTUDIOBONES];

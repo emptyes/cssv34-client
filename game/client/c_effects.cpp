@@ -87,7 +87,7 @@ static CUtlVector<CClient_Precipitation*> g_Precipitations;
 class CSnowFallManager;
 static CSnowFallManager *s_pSnowFallMgr = NULL;
 bool SnowFallManagerCreate( CClient_Precipitation *pSnowEntity );
-void SnowFallManagerDestroy( void );
+void SnowFallManagerRemove( CClient_Precipitation *pSnowEntity );
 
 class AshDebrisEffect : public CSimpleEmitter
 {
@@ -269,11 +269,12 @@ void CClient_Precipitation::OnDataChanged( DataUpdateType_t updateType )
 	if ( updateType == DATA_UPDATE_CREATED )
 	{
 		SetNextClientThink( CLIENT_THINK_ALWAYS );
-		if ( m_nPrecipType == PRECIPITATION_TYPE_SNOWFALL )
-		{
-			SnowFallManagerCreate( this );
-		}
 	}
+
+	if ( m_nPrecipType == PRECIPITATION_TYPE_SNOWFALL )
+		SnowFallManagerCreate( this );
+	else
+		SnowFallManagerRemove( this );
 
 	m_flDensity = RemapVal( m_clrRender->a, 0, 255, 0, 0.001 );
 
@@ -640,7 +641,7 @@ CClient_Precipitation::CClient_Precipitation() : m_Remainder(0.0f)
 CClient_Precipitation::~CClient_Precipitation()
 {
 	g_Precipitations.FindAndRemove( this );
-	SnowFallManagerDestroy();
+	SnowFallManagerRemove( this );
 }
 
 //-----------------------------------------------------------------------------
@@ -1512,7 +1513,8 @@ Vector Color32ToVector( const color32 &color )
 
 int	C_QuadraticBeam::DrawModel( int )
 {
-	Draw_SetSpriteTexture( GetModel(), 0, GetRenderMode() );
+	if ( !Draw_SetSpriteTexture( GetModel(), 0, GetRenderMode() ) )
+		return 0;
 	Vector color = Color32ToVector( GetRenderColor() );
 	DrawBeamQuadratic( GetRenderOrigin(), m_controlPosition, m_targetPosition, m_flWidth, color, gpGlobals->curtime*m_scrollRate );
 	return 1;
@@ -1606,6 +1608,8 @@ public:
 	void ClientThink();
 
 	void AddSnowFallEntity( CClient_Precipitation *pSnowEntity );
+	void RemoveSnowFallEntity( CClient_Precipitation *pSnowEntity );
+	bool HasSnowFallEntities( void ) const { return m_aSnow.Count() != 0; }
 
 	// Snow Effect
 	enum
@@ -1658,7 +1662,6 @@ private:
 	{
 		PMaterialHandle			m_hMaterial;
 		CClient_Precipitation	*m_pEntity;
-		SnowFallEffect			*m_pEffect;
 		Vector					m_vecMin;
 		Vector					m_vecMax;
 	};
@@ -1686,6 +1689,8 @@ CSnowFallManager::CSnowFallManager( void )
 //-----------------------------------------------------------------------------
 CSnowFallManager::~CSnowFallManager( void )
 {
+	if ( s_pSnowFallMgr == this )
+		s_pSnowFallMgr = NULL;
 	m_aSnow.Purge();
 }
 
@@ -1763,7 +1768,6 @@ void CSnowFallManager::AddSnowFallEntity( CClient_Precipitation *pSnowEntity )
 
 	iSnow = m_aSnow.AddToTail();
 	m_aSnow[iSnow].m_pEntity = pSnowEntity;
-	m_aSnow[iSnow].m_pEffect = SnowFallEffect::Create( "snowfall" );
 	m_aSnow[iSnow].m_hMaterial = ParticleMgr()->GetPMaterial( "particle/snow" );
 
 	VectorCopy( pSnowEntity->WorldAlignMins(), m_aSnow[iSnow].m_vecMin );
@@ -1775,6 +1779,21 @@ void CSnowFallManager::AddSnowFallEntity( CClient_Precipitation *pSnowEntity )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+void CSnowFallManager::RemoveSnowFallEntity( CClient_Precipitation *pSnowEntity )
+{
+	for ( int iSnow = 0; iSnow < m_aSnow.Count(); ++iSnow )
+	{
+		if ( m_aSnow[iSnow].m_pEntity == pSnowEntity )
+		{
+			m_aSnow.Remove( iSnow );
+			m_nActiveSnowCount = 0;
+			m_iSnowFallArea = SNOWFALL_NONE;
+			m_tSnowFallParticleTraceTimer.Init( 6 );
+			return;
+		}
+	}
+}
+
 void CSnowFallManager::UpdateBounds( const Vector &vecSnowMin, const Vector &vecSnowMax )
 {
 	int iAxis = 0;
@@ -2196,14 +2215,22 @@ void CSnowFallManager::CreateSnowFallParticle( const Vector &vecParticleSpawn, i
 //-----------------------------------------------------------------------------
 bool SnowFallManagerCreate( CClient_Precipitation *pSnowEntity )
 {
+	if ( !pSnowEntity )
+		return false;
+
 	if ( !s_pSnowFallMgr )
+	{
+		CSnowFallManager *pManager = new CSnowFallManager();
+		if ( !pManager )
+			return false;
+
+		if ( !pManager->CreateEmitter() || !pManager->InitializeAsClientEntity( NULL, RENDER_GROUP_OTHER ) )
 		{
-		s_pSnowFallMgr = new CSnowFallManager();
-		s_pSnowFallMgr->CreateEmitter();
-		s_pSnowFallMgr->InitializeAsClientEntity( NULL, RENDER_GROUP_OTHER );
-		if ( !s_pSnowFallMgr )
+			delete pManager;
 			return false;
 		}
+		s_pSnowFallMgr = pManager;
+	}
 
 	s_pSnowFallMgr->AddSnowFallEntity( pSnowEntity );
 	return true;
@@ -2212,11 +2239,15 @@ bool SnowFallManagerCreate( CClient_Precipitation *pSnowEntity )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void SnowFallManagerDestroy( void )
+void SnowFallManagerRemove( CClient_Precipitation *pSnowEntity )
 {
 	if ( s_pSnowFallMgr )
 	{
-		delete s_pSnowFallMgr;
-		s_pSnowFallMgr = NULL;
+		s_pSnowFallMgr->RemoveSnowFallEntity( pSnowEntity );
+		if ( !s_pSnowFallMgr->HasSnowFallEntities() )
+		{
+			delete s_pSnowFallMgr;
+			s_pSnowFallMgr = NULL;
+		}
 	}
 }

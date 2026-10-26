@@ -407,7 +407,8 @@ void CEngineSprite::GetHUDSpriteColor( float* color )
 static unsigned int frameCache = 0;
 IMaterial *CEngineSprite::GetMaterial( RenderMode_t nRenderMode, int nFrame ) 
 {
-	if ( nRenderMode == kRenderNone || nRenderMode == kRenderEnvironmental )
+	if ( (unsigned int)nRenderMode >= kRenderModeCount ||
+		nRenderMode == kRenderNone || nRenderMode == kRenderEnvironmental )
 		return NULL;
 
 	if ( IsVideo() )
@@ -431,6 +432,9 @@ IMaterial *CEngineSprite::GetMaterial( RenderMode_t nRenderMode, int nFrame )
 
 void CEngineSprite::SetFrame( RenderMode_t nRenderMode, int nFrame )
 {
+	if ( (unsigned int)nRenderMode >= kRenderModeCount )
+		return;
+
 	if ( IsVideo() )
 	{
 		m_VideoMaterial->SetFrame( nFrame );
@@ -509,10 +513,12 @@ void CEngineSprite::DrawFrameOfSize( RenderMode_t nRenderMode, int frame, int x,
 	if ( giScissorTest && !Scissor( x, y, iWidth, iHeight, fLeft, fTop, fRight, fBottom ) )
 		return;
 
-	SetFrame( nRenderMode, frame );
+	IMaterial *pMaterial = GetMaterial( nRenderMode, frame );
+	if ( !pMaterial )
+		return;
 
 	CMatRenderContextPtr pRenderContext( materials );
-	IMesh* pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, GetMaterial( nRenderMode ) );
+	IMesh* pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, pMaterial );
 
 	CMeshBuilder meshBuilder;
 	meshBuilder.Begin( pMesh, MATERIAL_QUADS, 1 );
