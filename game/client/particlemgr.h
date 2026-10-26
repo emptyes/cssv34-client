@@ -402,6 +402,10 @@ public:
 	void			SetAlwaysSimulate( int bAlwaysSimulate )		{ SetFlag( FLAGS_ALWAYSSIMULATE, bAlwaysSimulate ); }
 
 	void			SetIsNewParticleSystem( void )		{ SetFlag( FLAGS_NEW_PARTICLE_SYSTEM, 1 ); }
+	// Draw this effect after the other translucent renderables (smoke grenades), so sprites,
+	// trails and beams behind or inside it can't be seen through it. See viewrender.cpp.
+	int				GetDrawAfterTranslucents() const				{ return GetFlag( FLAGS_DRAW_AFTER_TRANSLUCENTS ); }
+	void			SetDrawAfterTranslucents( int bDrawAfter )		{ SetFlag( FLAGS_DRAW_AFTER_TRANSLUCENTS, bDrawAfter ); }
 	// Set if the effect was drawn the previous frame.
 	// This can be used by particle effect classes
 	// to decide whether or not they want to spawn
@@ -545,7 +549,8 @@ private:
 		FLAGS_DRAW_BEFORE_VIEW_MODEL=(1<<9),// Draw before the view model? If this is set, it assumes FLAGS_DRAW_THRU_LEAF_SYSTEM goes off.
 		FLAGS_AUTOAPPLYLOCALTRANSFORM=(1<<10), // Automatically apply the local transform to CParticleMgr::GetModelView()'s matrix.
 		FLAGS_FIRST_FRAME =         (1<<11),	// Cleared after the first frame that this system exists (so it can simulate after rendering once).
-		FLAGS_NEW_PARTICLE_SYSTEM=  (1<<12) // uses new particle system
+		FLAGS_NEW_PARTICLE_SYSTEM=  (1<<12), // uses new particle system
+		FLAGS_DRAW_AFTER_TRANSLUCENTS=(1<<13) // See SetDrawAfterTranslucents.
 	};
 
 
@@ -654,6 +659,9 @@ public:
 
 	// Draw the effects marked with SetDrawBeforeViewModel.
 	void			DrawBeforeViewModelEffects();
+
+	// Visible effects marked with SetDrawAfterTranslucents, returns the count filled in
+	int				GetDrawAfterTranslucentsEffects( CParticleEffectBinding **ppEffects, int nMaxEffects );
 
 	// Returns the modelview matrix
 	VMatrix&		GetModelView();
