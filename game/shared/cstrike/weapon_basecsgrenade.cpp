@@ -50,7 +50,8 @@ END_NETWORK_TABLE()
 #if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CBaseCSGrenade )
 	DEFINE_PRED_FIELD( m_bRedraw, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
-	DEFINE_PRED_FIELD( m_bRedraw, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_bPinPulled, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_fThrowTime, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
 END_PREDICTION_DATA()
 #endif
 
@@ -108,7 +109,7 @@ bool CBaseCSGrenade::Deploy()
 bool CBaseCSGrenade::Holster( CBaseCombatWeapon *pSwitchingTo )
 {
 	m_bRedraw = false;
-	m_bPinPulled = false; // when this is holstered make sure the pin isn’t pulled.
+	m_bPinPulled = false; // when this is holstered make sure the pin isnâ€™t pulled.
 	m_fThrowTime = 0;
 
 #ifndef CLIENT_DLL
