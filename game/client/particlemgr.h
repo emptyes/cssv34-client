@@ -715,7 +715,8 @@ private:
 		const CViewSetup& view, const VMatrix &worldToPixels, float flFocalDist );
 
 	bool RetireParticleCollections( CParticleSystemDefinition* pDef, int nCount, RetireInfo_t *pInfo, float flScreenArea, float flMaxTotalArea );
-	void BuildParticleSimList( CUtlVector< CNewParticleEffect* > &list );
+	typedef CUtlVectorFixedGrowable< CNewParticleEffect*, 128 > ParticleSimList_t;
+	void BuildParticleSimList( ParticleSimList_t &list );
 	bool EarlyRetireParticleSystems( int nCount, CNewParticleEffect **ppEffects );
 	static int RetireSort( const void *p1, const void *p2 ); 
 
