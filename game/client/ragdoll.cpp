@@ -823,12 +823,10 @@ struct ragdoll_memory_list_t
 			return;
 		}
 
-		for ( int i = list.Count()-1; i >= 0; --i )
+		// AddToList updates before appending, so every entry belongs to one tick.
+		if ( list.Count() && list[0].tickCount != gpGlobals->tickcount )
 		{
-			if ( list[i].tickCount != gpGlobals->tickcount )
-			{
-				list.FastRemove(i);
-			}
+			list.RemoveAll();
 		}
 	}
 
