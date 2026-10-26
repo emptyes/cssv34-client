@@ -1382,6 +1382,9 @@ inline void CInterpolatedVarArrayBase<Type, IS_ARRAY>::TimeFixup2_Hermite(
 	if ( fabs( dt1 - dt2 ) > 0.0001f &&
 		dt2 > 0.0001f )
 	{
+		// Allocate temporary array storage only when a time fixup is needed.
+		fixup.Init( m_nMaxCount );
+
 		// Renormalize
 		float frac = dt1 / dt2;
 
@@ -1434,7 +1437,6 @@ inline void CInterpolatedVarArrayBase<Type, IS_ARRAY>::_Interpolate_Hermite(
 	CDisableRangeChecks disableRangeChecks; 
 
 	CInterpolatedVarEntry fixup;
-	fixup.Init(m_nMaxCount);
 	TimeFixup_Hermite( fixup, prev, start, end );
 
 	for( int i = 0; i < m_nMaxCount; i++ )
@@ -1473,7 +1475,6 @@ inline void CInterpolatedVarArrayBase<Type, IS_ARRAY>::_Derivative_Hermite(
 	CDisableRangeChecks disableRangeChecks; 
 
 	CInterpolatedVarEntry fixup;
-	fixup.value = (Type*)_alloca( sizeof(Type) * m_nMaxCount );
 	TimeFixup_Hermite( fixup, prev, start, end );
 
 	float divisor = 1.0f / (end->changetime - start->changetime);
@@ -1496,7 +1497,6 @@ inline void CInterpolatedVarArrayBase<Type, IS_ARRAY>::_Derivative_Hermite_Smoot
 	CInterpolatedVarEntry *d )
 {
 	CInterpolatedVarEntry fixup;
-	fixup.Init(m_nMaxCount);
 	TimeFixup_Hermite( fixup, b, c, d );
 	for ( int i=0; i < m_nMaxCount; i++ )
 	{
