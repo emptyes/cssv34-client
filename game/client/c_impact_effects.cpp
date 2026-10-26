@@ -96,7 +96,9 @@ extern PMaterialHandle g_Material_Spark;
 //-----------------------------------------------------------------------------
 void GetColorForSurface( trace_t *trace, Vector *color )
 {
-	Vector	baseColor, diffuseColor;
+	// Some material providers can return without writing their output.
+	// Keep a neutral albedo and lighting for those paths, not stack contents.
+	Vector baseColor( 0.5f, 0.5f, 0.5f ), diffuseColor( 1.0f, 1.0f, 1.0f );
 	Vector	end = trace->startpos + ( ( Vector )trace->endpos - ( Vector )trace->startpos ) * 1.1f;
 	
 	if ( trace->DidHitWorld() )
@@ -104,7 +106,13 @@ void GetColorForSurface( trace_t *trace, Vector *color )
 		if ( trace->hitbox == 0 )
 		{
 			// If we hit the world, then ask the world for the fleck color
-			engine->TraceLineMaterialAndLighting( trace->startpos, end, diffuseColor, baseColor );
+			if ( !engine->TraceLineMaterialAndLighting( trace->startpos, end, diffuseColor, baseColor ) )
+			{
+				// An edge/grazing trace can fail to find a lit surface. Keep the
+				// particles, using neutral albedo with lighting at the impact.
+				baseColor.Init( 0.5f, 0.5f, 0.5f );
+				diffuseColor = engine->GetLightForPoint( trace->endpos, true );
+			}
 		}
 		else
 		{
@@ -119,9 +127,9 @@ void GetColorForSurface( trace_t *trace, Vector *color )
 		if ( !pEnt )
 		{
 			Msg("Couldn't find surface in GetColorForSurface()\n");
-			color->x = 255;
-			color->y = 255;
-			color->z = 255;
+			color->x = 0.5f;
+			color->y = 0.5f;
+			color->z = 0.5f;
 			return;
 		}
 
