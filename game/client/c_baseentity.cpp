@@ -40,6 +40,7 @@
 #include "cdll_bounded_cvars.h"
 #include "inetchannelinfo.h"
 #include "proto_version.h"
+#include <algorithm>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -5176,29 +5177,11 @@ void C_BaseEntity::ShiftIntermediateDataForward( int slots_to_remove, int number
 
 	Assert( number_of_commands_run >= slots_to_remove );
 
-	// Just moving pointers, yeah
-	CUtlVector< unsigned char * > saved;
-
-	// Remember first slots
-	int i = 0;
-	for ( ; i < slots_to_remove; i++ )
-	{
-		saved.AddToTail( m_pIntermediateData[ i ] );
-	}
-
-	// Move rest of slots forward up to last slot
-	for ( ; i < number_of_commands_run; i++ )
-	{
-		m_pIntermediateData[ i - slots_to_remove ] = m_pIntermediateData[ i ];
-	}
-
-	// Put remembered slots onto end
-	for ( i = 0; i < slots_to_remove; i++ )
-	{
-		int slot = number_of_commands_run - slots_to_remove + i;
-
-		m_pIntermediateData[ slot ] = saved[ i ];
-	}
+	// Rotate the used pointer range without a temporary allocation. State buffers
+	// and slots beyond number_of_commands_run are left untouched.
+	std::rotate( m_pIntermediateData,
+		m_pIntermediateData + slots_to_remove,
+		m_pIntermediateData + number_of_commands_run );
 #endif
 }
 
