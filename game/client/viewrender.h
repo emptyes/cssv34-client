@@ -252,6 +252,7 @@ protected:
 	// Combination of DF_ flags.
 	int m_DrawFlags;
 	int m_ClearFlags;
+	bool m_bSmokeHandlesNoZ; // Per-view; no late redraw after smoke.
 
 	IWorldRenderList *m_pWorldRenderList;
 	CClientRenderablesList *m_pRenderablesList;
