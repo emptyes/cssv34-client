@@ -13,6 +13,7 @@
 #include "glow_overlay.h"
 #include "view.h"
 #include "particle_litsmokeemitter.h"
+#include "particles_new.h"
 
 class CFireOverlay;
 
@@ -184,7 +185,7 @@ protected:
 	CFireOverlay		*m_pFireOverlay;
 
 	// New Particle Fire Effect
-	CNewParticleEffect *m_hEffect;
+	HPARTICLEFFECT m_hEffect;
 private:
 	C_FireSmoke( const C_FireSmoke & );
 };
@@ -289,7 +290,7 @@ public:
 	virtual void	OnDataChanged( DataUpdateType_t updateType );
 	virtual void	ClientThink( void );
 
-	CNewParticleEffect *m_hEffect;
+	HPARTICLEFFECT m_hEffect;
 	EHANDLE				m_hEntAttached;		// The entity that we are burning (attached to).
 	EHANDLE				m_hOldAttached;
 

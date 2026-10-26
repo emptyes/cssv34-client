@@ -77,7 +77,7 @@ void CClientThinkList::SetNextClientThink( ClientThinkHandle_t hThink, float flN
 	{
 		// Queue up all changes
 		int i = m_aChangeList.AddToTail();
-		m_aChangeList[i].m_hEnt = INVALID_CLIENTENTITY_HANDLE;
+		m_aChangeList[i].m_hEnt = GetThinkEntry( hThink )->m_hEnt;
 		m_aChangeList[i].m_hThink = hThink;
 		m_aChangeList[i].m_flNextTime = flNextTime;
 		return;
@@ -95,7 +95,7 @@ void CClientThinkList::SetNextClientThink( ClientThinkHandle_t hThink, float flN
 
 void CClientThinkList::SetNextClientThink( ClientEntityHandle_t hEnt, float flNextTime )
 {
-	if ( flNextTime == CLIENT_THINK_NEVER )
+	if ( flNextTime == CLIENT_THINK_NEVER && !m_bInThinkLoop )
 	{
 		RemoveThinkable( hEnt );
 		return;
@@ -146,7 +146,7 @@ void CClientThinkList::RemoveThinkable( ClientThinkHandle_t hThink )
 	{
 		// Queue up all changes
 		int i = m_aChangeList.AddToTail();
-		m_aChangeList[i].m_hEnt = INVALID_CLIENTENTITY_HANDLE;
+		m_aChangeList[i].m_hEnt = GetThinkEntry( hThink )->m_hEnt;
 		m_aChangeList[i].m_hThink = hThink;
 		m_aChangeList[i].m_flNextTime = CLIENT_THINK_NEVER;
 		return;
@@ -170,6 +170,12 @@ void CClientThinkList::RemoveThinkable( ClientEntityHandle_t hEnt )
 	IClientThinkable *pThink = ClientEntityList().GetClientThinkableFromHandle( hEnt );
 	if ( pThink )
 	{
+		if ( m_bInThinkLoop )
+		{
+			SetNextClientThink( hEnt, CLIENT_THINK_NEVER );
+			return;
+		}
+
 		ClientThinkHandle_t hThink = pThink->GetThinkHandle();
 		if ( hThink != INVALID_THINK_HANDLE )
 		{
@@ -300,21 +306,18 @@ void CClientThinkList::PerformThinkFunctions()
 	int nCount = m_aChangeList.Count();
 	for ( i = 0; i < nCount; ++i )
 	{
-		ClientThinkHandle_t hThink = m_aChangeList[i].m_hThink;
-		if ( hThink != INVALID_THINK_HANDLE )
+		ClientEntityHandle_t hEnt = m_aChangeList[i].m_hEnt;
+		if ( ClientEntityList().GetClientThinkableFromHandle( hEnt ) )
 		{
-			// This can happen if the same think handle was removed twice
-			if ( !m_ThinkEntries.IsInList( (uintp)hThink ) )
-				continue;
-
-			// NOTE: This is necessary for the case where the client entity handle
-			// is slammed to NULL during a think interval; the hThink will get stuck
-			// in the list and can never leave.
-			SetNextClientThink( hThink, m_aChangeList[i].m_flNextTime );
+			SetNextClientThink( hEnt, m_aChangeList[i].m_flNextTime );
+			continue;
 		}
-		else
+
+		ClientThinkHandle_t hThink = m_aChangeList[i].m_hThink;
+		if ( hThink != INVALID_THINK_HANDLE && m_ThinkEntries.IsInList( (uintp)hThink ) &&
+			 GetThinkEntry( hThink )->m_hEnt == hEnt )
 		{
-			SetNextClientThink( m_aChangeList[i].m_hEnt, m_aChangeList[i].m_flNextTime );
+			RemoveThinkable( hThink );
 		}
 	}
 	m_aChangeList.RemoveAll();

@@ -11,6 +11,7 @@
 #include "beam_shared.h"
 #include "ivieweffects.h"
 #include "beamdraw.h"
+#include "model_types.h"
 #include "engine/ivdebugoverlay.h"
 #include "engine/ivmodelinfo.h"
 #include "view.h"
@@ -131,7 +132,7 @@ private:
 
 	// Creation
 	Beam_t					*CreateGenericBeam( BeamInfo_t &beamInfo );
-	void					SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo );
+	bool					SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo );
 	void					SetBeamAttributes( Beam_t *pBeam, const BeamInfo_t &beamInfo );
 	
 	// Memory Alloc/Free
@@ -585,6 +586,7 @@ Beam_t *CViewRenderBeams::BeamAlloc( bool bRenderable )
 		{
 			DevMsg( "ERROR: failed to alloc Beam_t!\n" );
 			Assert( pBeam );
+			return NULL;
 		}
 	}
 	pBeam->next		= m_pActiveBeams;
@@ -693,11 +695,18 @@ void CViewRenderBeams::KillDeadBeams( C_BaseEntity *pDeadEntity )
 //   Input: pBeam -
 //          beamInfo -
 //-----------------------------------------------------------------------------
-void CViewRenderBeams::SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo )
+bool CViewRenderBeams::SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo )
 {
+	if ( beamInfo.m_nModelIndex < 0 )
+		return false;
+
 	const model_t *pSprite = modelinfo->GetModel( beamInfo.m_nModelIndex );
-	if ( !pSprite )
-		return;
+	if ( !pSprite || modelinfo->GetModelType( pSprite ) != mod_sprite )
+		return false;
+
+	int frameCount = modelinfo->GetModelFrameCount( pSprite );
+	if ( frameCount <= 0 )
+		return false;
 
 	pBeam->type				= ( beamInfo.m_nType < 0 ) ? TE_BEAMPOINTS : beamInfo.m_nType;
 	pBeam->modelIndex		= beamInfo.m_nModelIndex;
@@ -705,7 +714,7 @@ void CViewRenderBeams::SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo )
 	pBeam->haloScale		= beamInfo.m_flHaloScale;
 	pBeam->frame			= 0;
 	pBeam->frameRate		= 0;
-	pBeam->frameCount		= modelinfo->GetModelFrameCount( pSprite );
+	pBeam->frameCount		= frameCount;
 	pBeam->freq				= gpGlobals->curtime * beamInfo.m_flSpeed;
 	pBeam->die				= gpGlobals->curtime + beamInfo.m_flLife;
 	pBeam->width			= beamInfo.m_flWidth;
@@ -737,6 +746,8 @@ void CViewRenderBeams::SetupBeam( Beam_t *pBeam, const BeamInfo_t &beamInfo )
 	{
 		pBeam->segments = beamInfo.m_nSegments;
 	}
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -826,15 +837,12 @@ Beam_t *CViewRenderBeams::CreateGenericBeam( BeamInfo_t &beamInfo )
 	if ( !pBeam )
 		return NULL;
 
-	// In case we fail.
-	pBeam->die = gpGlobals->curtime;
-
-	// Need a valid model.
-	if ( beamInfo.m_nModelIndex < 0 )
+	if ( !SetupBeam( pBeam, beamInfo ) )
+	{
+		m_pActiveBeams = pBeam->next;
+		BeamFree( pBeam );
 		return NULL;
-
-	// Set it up
-	SetupBeam( pBeam, beamInfo );
+	}
 
 	return pBeam;	
 }
@@ -1944,7 +1952,7 @@ void CViewRenderBeams::DrawBeam( Beam_t *pbeam )
 	const model_t	*sprite;
 	const model_t	*halosprite = NULL;
 
-	if ( pbeam->modelIndex < 0 )
+	if ( pbeam->modelIndex < 0 || pbeam->frameCount <= 0 )
 	{
 		pbeam->die = gpGlobals->curtime;
 		return;
@@ -2249,7 +2257,8 @@ void CViewRenderBeams::DrawBeam( C_Beam* pbeam, ITraceFilter *pEntityBeamTraceFi
 	bBeamDrawingThroughPortal = false;
 #endif
 
-	SetupBeam( &beam, beamInfo );
+	if ( !SetupBeam( &beam, beamInfo ) )
+		return;
 
 	beamInfo.m_nStartFrame = pbeam->m_fStartFrame;
 	beamInfo.m_flFrameRate = pbeam->m_flFrameRate;

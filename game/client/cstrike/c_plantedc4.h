@@ -15,6 +15,7 @@
 #include "c_cs_player.h"
 
 #include "utlvector.h"
+#include "particles_new.h"
 
 // ------------------------------------------------------------------------------------------ //
 // CPlantedC4 class.
@@ -65,7 +66,7 @@ public:
 
 	float	m_flNextRadarFlashTime;	// next time to change flash state
 	bool	m_bRadarFlash;			// is the flash on or off
-	CNewParticleEffect *m_pC4Explosion; // client side explosion particle effect for the bomb
+	HPARTICLEFFECT m_pC4Explosion; // client side explosion particle effect for the bomb
 };
 
 extern CUtlVector< C_PlantedC4* > g_PlantedC4s;

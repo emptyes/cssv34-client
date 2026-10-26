@@ -1181,10 +1181,15 @@ void C_BaseAnimating::GetBonePosition ( int iBone, Vector &origin, QAngle &angle
 
 void C_BaseAnimating::GetBoneTransform( int iBone, matrix3x4_t &pBoneToWorld )
 {
-	Assert( GetModelPtr() && iBone >= 0 && iBone < GetModelPtr()->numbones() );
-	CBoneCache *pcache = GetBoneCache( NULL );
+	CStudioHdr *pStudioHdr = GetModelPtr();
+	if ( !pStudioHdr || iBone < 0 || iBone >= pStudioHdr->numbones() )
+	{
+		MatrixCopy( EntityToWorldTransform(), pBoneToWorld );
+		return;
+	}
 
-	matrix3x4_t *pmatrix = pcache->GetCachedBone( iBone );
+	CBoneCache *pcache = GetBoneCache( pStudioHdr );
+	matrix3x4_t *pmatrix = pcache ? pcache->GetCachedBone( iBone ) : NULL;
 
 	if ( !pmatrix )
 	{
@@ -1237,7 +1242,7 @@ void C_BaseAnimating::DelayedInitModelEffects( void )
 	m_bInitModelEffects = false;
 
 	// Parse the keyvalues and see if they want to make ropes on this model.
-	KeyValues * modelKeyValues = new KeyValues("");
+	KeyValues::AutoDelete modelKeyValues( "" );
 	if ( modelKeyValues->LoadFromBuffer( modelinfo->GetModelName( GetModel() ), modelinfo->GetModelKeyValueText( GetModel() ) ) )
 	{
 		// Do we have a cables section?
@@ -1315,7 +1320,6 @@ void C_BaseAnimating::DelayedInitModelEffects( void )
 		}
 	}
 
-	modelKeyValues->deleteThis();
 }
 
 
@@ -2232,6 +2236,11 @@ bool C_BaseAnimating::IsMenuModel() const
 // UNDONE: Seems kind of silly to have this when we also have the cached bones in C_BaseAnimating
 CBoneCache *C_BaseAnimating::GetBoneCache( CStudioHdr *pStudioHdr )
 {
+	if ( !pStudioHdr )
+		pStudioHdr = GetModelPtr();
+	if ( !pStudioHdr || pStudioHdr->numbones() <= 0 || pStudioHdr->numbones() > MAXSTUDIOBONES )
+		return NULL;
+
 	int boneMask = BONE_USED_BY_HITBOX;
 	CBoneCache *pcache = Studio_GetBoneCache( m_hitboxBoneCacheHandle );
 	if ( pcache )
@@ -2250,13 +2259,12 @@ CBoneCache *C_BaseAnimating::GetBoneCache( CStudioHdr *pStudioHdr )
 		}
 	}
 
-	if ( !pStudioHdr ) 
-		pStudioHdr = GetModelPtr( );
-	Assert(pStudioHdr);
-
 	C_BaseAnimating::PushAllowBoneAccess( true, false, "GetBoneCache" );
-	SetupBones( NULL, -1, boneMask, gpGlobals->curtime );
+	bool bSetup = SetupBones( NULL, -1, boneMask, gpGlobals->curtime );
 	C_BaseAnimating::PopBoneAccess( "GetBoneCache" );
+
+	if ( !bSetup || m_CachedBoneData.Count() < pStudioHdr->numbones() )
+		return NULL;
 
 	if ( pcache )
 	{
@@ -2275,7 +2283,6 @@ CBoneCache *C_BaseAnimating::GetBoneCache( CStudioHdr *pStudioHdr )
 		m_hitboxBoneCacheHandle = Studio_CreateBoneCache( params );
 		pcache = Studio_GetBoneCache( m_hitboxBoneCacheHandle );
 	}
-	Assert(pcache);
 	return pcache;
 }
 
@@ -3150,6 +3157,8 @@ bool C_BaseAnimating::HitboxToWorldTransforms( matrix3x4_t *pHitboxToWorld[MAXST
 		return false;
 
 	CBoneCache *pCache = GetBoneCache( pStudioHdr );
+	if ( !pCache )
+		return false;
 	pCache->ReadCachedBonePointers( pHitboxToWorld, pStudioHdr->numbones() );
 	return true;
 }
@@ -4964,6 +4973,8 @@ bool C_BaseAnimating::TestHitboxes( const Ray_t &ray, unsigned int fContentsMask
 	Assert( ray.m_StartOffset == vec3_origin );
 
 	CBoneCache *pCache = GetBoneCache( pStudioHdr );
+	if ( !pCache )
+		return false;
 	matrix3x4_t *hitboxbones[MAXSTUDIOBONES];
 	pCache->ReadCachedBonePointers( hitboxbones, pStudioHdr->numbones() );
 
@@ -5790,6 +5801,8 @@ bool C_BaseAnimating::ComputeHitboxSurroundingBox( Vector *pVecWorldMins, Vector
 		return false;
 
 	CBoneCache *pCache = GetBoneCache( pStudioHdr );
+	if ( !pCache )
+		return false;
 	matrix3x4_t *hitboxbones[MAXSTUDIOBONES];
 	pCache->ReadCachedBonePointers( hitboxbones, pStudioHdr->numbones() );
 
@@ -5828,6 +5841,8 @@ bool C_BaseAnimating::ComputeEntitySpaceHitboxSurroundingBox( Vector *pVecWorldM
 		return false;
 
 	CBoneCache *pCache = GetBoneCache( pStudioHdr );
+	if ( !pCache )
+		return false;
 	matrix3x4_t *hitboxbones[MAXSTUDIOBONES];
 	pCache->ReadCachedBonePointers( hitboxbones, pStudioHdr->numbones() );
 
