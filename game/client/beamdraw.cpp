@@ -8,6 +8,7 @@
 
 #include "cbase.h"
 #include "beamdraw.h"
+#include "model_types.h"
 #include "enginesprite.h"
 #include "iviewrender_beams.h"
 #include "view.h"
@@ -36,8 +37,12 @@ CEngineSprite *Draw_SetSpriteTexture( const model_t *pSpriteModel, int frame, in
 	CEngineSprite			*psprite;
 	IMaterial		*material;
 
+	if ( !pSpriteModel || modelinfo->GetModelType( pSpriteModel ) != mod_sprite )
+		return NULL;
+
 	psprite = ( CEngineSprite * )modelinfo->GetModelExtraData( pSpriteModel );
-	Assert( psprite );
+	if ( !psprite )
+		return NULL;
 
 	material = psprite->GetMaterial( (RenderMode_t)rendermode, frame );
 	if( !material )
