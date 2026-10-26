@@ -393,12 +393,12 @@ void C_SoundscapeSystem::Shutdown()
 	m_params.ent.Set( NULL );
 	m_params.soundscapeIndex = -1;
 
-	while ( m_SoundscapeScripts.Count() > 0 )
+	for ( int i = 0; i < m_SoundscapeScripts.Count(); ++i )
 	{
-		KeyValues *kv = m_SoundscapeScripts[ 0 ];
-		m_SoundscapeScripts.Remove( 0 );
+		KeyValues *kv = m_SoundscapeScripts[ i ];
 		kv->deleteThis();
 	}
+	m_SoundscapeScripts.RemoveAll();
 }
 
 // NOTE: This will not flush the server side so you cannot add or remove
