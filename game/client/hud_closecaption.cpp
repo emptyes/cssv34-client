@@ -262,13 +262,7 @@ public:
 
 	~CCloseCaptionItem( void )
 	{
-		while ( m_Work.Count() > 0 )
-		{
-			CCloseCaptionWorkUnit *unit = m_Work[ 0 ];
-			m_Work.Remove( 0 );
-			delete unit;
-		}
-
+		m_Work.PurgeAndDeleteElements();
 	}
 
 	void SetStream( const wchar_t *stream)
@@ -963,7 +957,7 @@ void CHudCloseCaption::Paint( void )
 
 	int totalheight = 0;
 	int i;
-	CUtlVector< VisibleStreamItem > visibleitems;
+	CUtlVectorFixedGrowable< VisibleStreamItem, 8 > visibleitems;
 	int c = m_Items.Count();
 	int maxwidth = 0;
 
@@ -998,18 +992,21 @@ void CHudCloseCaption::Paint( void )
 
 		visibleitems.AddToTail( si );
 
-		// Start popping really old items off the stack if we run out of space
+		int numToRemove = 0;
 		while ( itemheight <= avail_height && 
 				totalheight > avail_height && 
-				visibleitems.Count() > cc_minvisibleitems.GetInt() )
+				visibleitems.Count() - numToRemove > cc_minvisibleitems.GetInt() )
 		{
-			VisibleStreamItem & pop = visibleitems[ 0 ];
+			VisibleStreamItem & pop = visibleitems[ numToRemove ];
 			totalheight -= pop.height;
 
 			// And make it die right away...
 			pop.item->SetTimeToLive( 0.0f );
-
-			visibleitems.Remove( 0 );
+			++numToRemove;
+		}
+		if ( numToRemove )
+		{
+			visibleitems.RemoveMultiple( 0, numToRemove );
 		}	
 	}
 
@@ -1250,47 +1247,44 @@ void CHudCloseCaption::OnTick( void )
 		}
 	}
 
-	// Pass two, remove from head until we get to first item with time remaining
-	bool foundfirstnondeletion = false;
+	int nRemoved = 0;
 	for ( i = 0 ; i < c ; ++i )
 	{
 		CCloseCaptionItem *item = m_Items[ i ];
 
-		// Skip items not yet showing...
 		float predisplay = item->GetPreDisplayTime();
 		if ( predisplay > 0.0f )
 		{
+			if ( nRemoved )
+			{
+				m_Items[ i - nRemoved ] = item;
+			}
 			continue;
 		}
 
 		float ttl = item->GetTimeToLive();
 		if ( ttl > 0.0f )
 		{
-			foundfirstnondeletion = true;
-			continue;
-		}
-
-		// Skip the remainder of the items after we find the first/oldest active item
-		if ( foundfirstnondeletion )
-		{
-			continue;
+			break;
 		}
 
 		delete item;
-		m_Items.Remove( i );
-		--i;
-		--c;
+		++nRemoved;
+	}
+
+	if ( nRemoved )
+	{
+		m_Items.RemoveMultiple( i - nRemoved, nRemoved );
 	}
 }
 
 void CHudCloseCaption::Reset( void )
 {
-	while ( m_Items.Count() > 0 )
+	for ( int i = 0; i < m_Items.Count(); ++i )
 	{
-		CCloseCaptionItem *i = m_Items[ 0 ];
-		delete i;
-		m_Items.Remove( 0 );
+		delete m_Items[ i ];
 	}
+	m_Items.RemoveAll();
 
 	ClearAsyncWork();
 	Unlock();
