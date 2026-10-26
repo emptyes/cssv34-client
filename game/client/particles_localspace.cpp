@@ -129,8 +129,8 @@ void CLocalSpaceEmitter::SetupTransformMatrix( void )
 		matrix3x4_t mat;
 		if ( pRenderable->GetAttachment( m_nAttachment, mat ) == false )
 		{
-			// This attachment is bogus!
-			Assert(0);
+			// The attachment may be unavailable while the model is changing.
+			MatrixCopy( pRenderable->RenderableToWorldTransform(), mat );
 		}
 	
 		// Tell the particle effect so it knows
