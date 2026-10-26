@@ -1237,7 +1237,7 @@ void C_CSPlayer::UpdateSoundEvents()
 		if ( gpGlobals->curtime >= pEvent->m_flEventTime )
 		{
 			CLocalPlayerFilter filter;
-			EmitSound( filter, GetSoundSourceIndex(), STRING( pEvent->m_SoundName ) );
+			EmitSound( filter, GetSoundSourceIndex(), pEvent->m_SoundName );
 
 			m_SoundEvents.Remove( i );
 		}
@@ -2058,7 +2058,7 @@ void C_CSPlayer::PlayReloadEffect()
 				if ( pEvent->event == CL_EVENT_SOUND )
 				{
 					CCSSoundEvent event;
-					event.m_SoundName = pEvent->options;
+					Q_strncpy( event.m_SoundName, pEvent->options, sizeof( event.m_SoundName ) );
 					event.m_flEventTime = gpGlobals->curtime + pEvent->cycle / cyclesPerSecond;
 					m_SoundEvents.AddToTail( event );
 				}
