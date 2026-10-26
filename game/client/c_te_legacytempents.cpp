@@ -1109,6 +1109,7 @@ void CTempEnts::PhysicsProp( int modelindex, int skin, const Vector& pos, const 
 	if ( !model )
 	{
 		DevMsg("CTempEnts::PhysicsProp: model index %i not found\n", modelindex );
+		pEntity->Release();
 		return;
 	}
 
