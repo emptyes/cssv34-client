@@ -109,13 +109,15 @@ void C_DynamicLight::Release()
 {
 	if (m_pDynamicLight)
 	{
-		m_pDynamicLight->die = gpGlobals->curtime;
+		if (m_pDynamicLight->key == index)
+			m_pDynamicLight->die = gpGlobals->curtime;
 		m_pDynamicLight = 0;
 	}
 	
 	if (m_pSpotlightEnd)
 	{
-		m_pSpotlightEnd->die = gpGlobals->curtime;
+		if (m_pSpotlightEnd->key == -index)
+			m_pSpotlightEnd->die = gpGlobals->curtime;
 		m_pSpotlightEnd = 0;
 	}
 
@@ -167,7 +169,8 @@ void C_DynamicLight::ClientThink(void)
 		// In this case, the m_Flags could have changed; which is how we turn the light off
 		if (m_pDynamicLight)
 		{
-			m_pDynamicLight->die = gpGlobals->curtime;
+			if (m_pDynamicLight->key == index)
+				m_pDynamicLight->die = gpGlobals->curtime;
 			m_pDynamicLight = 0;
 		}
 	}
@@ -227,7 +230,8 @@ void C_DynamicLight::ClientThink(void)
 		// In this case, the m_Flags could have changed; which is how we turn the light off
 		if (m_pSpotlightEnd)
 		{
-			m_pSpotlightEnd->die = gpGlobals->curtime;
+			if (m_pSpotlightEnd->key == -index)
+				m_pSpotlightEnd->die = gpGlobals->curtime;
 			m_pSpotlightEnd = 0;
 		}
 	}
