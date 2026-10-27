@@ -203,6 +203,7 @@ CMatSystemSurface::CMatSystemSurface() : m_pEmbeddedPanel(NULL), m_pWhite(NULL)
 
 	m_bNeedsKeyboard = true;
 	m_bNeedsMouse = true;
+	m_bForceCursorVisible = false;
 	m_bUsingTempFullScreenBufferMaterial = false;
 	m_nFullScreenBufferMaterialId = -1;
 
@@ -2869,6 +2870,12 @@ void CMatSystemSurface::SetCursor(HCursor hCursor)
 	if ( IsCursorLocked() )
 		return;
 
+	if ( m_bNeedsMouse && !input()->GetMouseCapture() &&
+		 ( hCursor == vgui::dc_none || hCursor == vgui::dc_user || hCursor == vgui::dc_blank ) )
+	{
+		hCursor = vgui::dc_arrow;
+	}
+
 	if ( _currentCursor != hCursor )
 	{
 		_currentCursor = hCursor;
@@ -4079,7 +4086,10 @@ void CMatSystemSurface::CalculateMouseVisible()
 	m_bNeedsKeyboard = false;
 
 	if ( input()->GetMouseCapture() != 0 )
+	{
+		UpdateForceCursorVisible( false );
 		return;
+	}
 
 	int c = surface()->GetPopupCount();
 
@@ -4154,16 +4164,31 @@ void CMatSystemSurface::CalculateMouseVisible()
 		// Failing to do this causes s_bCursorVisible to not be set correctly
 		// (UnlockCursor fails to set it correctly)
 		UnlockCursor();
-		if ( _currentCursor == vgui::dc_none )
+		if ( _currentCursor == vgui::dc_none || _currentCursor == vgui::dc_user || _currentCursor == vgui::dc_blank )
 		{
 			SetCursor(vgui::dc_arrow);
 		}
 	}
 	else
 	{
+		UpdateForceCursorVisible( false );
 		SetCursor(vgui::dc_none);
 		LockCursor();
 	}
+
+	if ( m_bNeedsMouse )
+	{
+		UpdateForceCursorVisible( true );
+	}
+}
+
+void CMatSystemSurface::UpdateForceCursorVisible( bool bForce )
+{
+	if ( m_bForceCursorVisible == bForce )
+		return;
+
+	m_bForceCursorVisible = bForce;
+	CursorSelect( bForce ? vgui::dc_alwaysvisible_push : vgui::dc_alwaysvisible_pop );
 }
 
 bool CMatSystemSurface::NeedKBInput()
