@@ -344,6 +344,10 @@ void C_ParticleSmokeGrenade::Start(CParticleMgr *pParticleMgr, IPrototypeArgAcce
 	if(!pParticleMgr->AddEffect( &m_ParticleEffect, this ))
 		return;
 	
+	// Draw the cloud after the other translucents, otherwise sprite trails, beams and sprites
+	// of players inside or behind it are drawn over the smoke (they don't write depth).
+	m_ParticleEffect.SetDrawAfterTranslucents( true );
+
 	m_SmokeTrail.Start(pParticleMgr, pArgs);
 
 	m_SmokeTrail.m_ParticleLifetime = 0.5;
