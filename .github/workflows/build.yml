@@ -104,6 +104,28 @@ jobs:
         path: android_armv7a_build
         if-no-files-found: error
         retention-days: 7
+        
+  build-android-arm64:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build android-arm64
+      run: |
+        chmod +x waf
+        chmod +x scripts/build-android-arm64.sh
+        ./scripts/build-android-arm64.sh
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: android_arm64_build
+        path: android_arm64_build
+        if-no-files-found: error
+        retention-days: 7
 
   release:
     needs: [build-windows-amd64, build-android-armv7a]
