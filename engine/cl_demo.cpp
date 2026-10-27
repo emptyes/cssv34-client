@@ -408,41 +408,107 @@ void CDemoRecorder::RecordServerClasses( ServerClass *pClasses )
 	m_DemoFile.WriteNetworkDataTables( &buf, GetRecordingTick() );
 }
 
+static bool WriteDemoStringTableEntry( CNetworkStringTable *table, int index, int lastEntry, bf_write &buffer )
+{
+	const char *name = table->GetString( index );
+	int length = 0;
+	const void *data = table->GetStringUserData( index, &length );
+	if ( !name || Q_strlen( name ) >= 1024 || length < 0 ||
+		length > CNetworkStringTableItem::MAX_USERDATA_SIZE || ( length > 0 && !data ) )
+		return false;
+
+	if ( table->IsUserDataFixedSize() )
+	{
+		if ( length > 0 && ( table->GetUserDataSize() <= 0 || length < table->GetUserDataSize() ||
+			table->GetUserDataSizeBits() < 0 || table->GetUserDataSizeBits() > length * 8 ) )
+			return false;
+	}
+	else if ( length >= CNetworkStringTableItem::MAX_USERDATA_SIZE )
+	{
+		return false;
+	}
+
+	const bool sequential = index == lastEntry + 1;
+	buffer.WriteOneBit( sequential ? 1 : 0 );
+	if ( !sequential )
+		buffer.WriteUBitLong( index, table->GetEntryBits() );
+	buffer.WriteOneBit( 1 );
+	buffer.WriteOneBit( 0 );
+	buffer.WriteString( name );
+	buffer.WriteOneBit( length > 0 ? 1 : 0 );
+	if ( length > 0 )
+	{
+		if ( table->IsUserDataFixedSize() )
+		{
+			buffer.WriteBits( data, table->GetUserDataSizeBits() );
+		}
+		else
+		{
+			buffer.WriteUBitLong( length, CNetworkStringTableItem::MAX_USERDATA_BITS );
+			buffer.WriteBits( data, length * 8 );
+		}
+	}
+	return !buffer.IsOverflowed();
+}
+
 void CDemoRecorder::RecordStringTables()
 {
 	MEM_ALLOC_CREDIT();
 
-	// !KLUDGE! It would be nice if the bit buffer could write into a stream
-	// with the power to grow itself.  But it can't.  Hence this really bad
-	// kludge
-	void *data = NULL;
-	int dataLen = 512 * 1024;
-	while ( dataLen <= DEMO_FILE_MAX_STRINGTABLE_SIZE )
-	{
-		data = realloc( data, dataLen );
-		bf_write buf( data, dataLen );
-		buf.SetDebugName("CDemoRecorder::RecordStringTables");
-		buf.SetAssertOnOverflow( false ); // Doesn't turn off all the spew / asserts, but turns off one
-		networkStringTableContainerClient->WriteStringTables( buf );
+	const int maxUpdateBits = 65535;
+	CUtlVector<unsigned char> data;
+	CUtlVector<unsigned char> packetData;
+	data.SetCount( 2 * ( ( maxUpdateBits + 7 ) / 8 ) );
+	packetData.SetCount( ( maxUpdateBits + 7 ) / 8 + 8 );
 
-		// Did we fit?
-		if ( !buf.IsOverflowed() )
+	for ( int i = 0; i < networkStringTableContainerClient->GetNumTables(); ++i )
+	{
+		CNetworkStringTable *table = static_cast<CNetworkStringTable *>( networkStringTableContainerClient->GetTable( i ) );
+		if ( !table || table->GetTableId() < 0 || table->GetTableId() >= MAX_TABLES )
 		{
-			// Now write the buffer into the demo file
-			m_DemoFile.WriteStringTables( &buf, GetRecordingTick() );
-			break;
+			Warning( "Failed to record string tables: invalid table index.\n" );
+			StopRecording();
+			return;
 		}
 
-		// Didn't fit.  Try doubling the size of the buffer
-		dataLen *= 2;
-	}
+		int entry = 0;
+		while ( entry < table->GetNumStrings() )
+		{
+			SVC_UpdateStringTable msg;
+			msg.m_nTableID = table->GetTableId();
+			msg.m_nChangedEntries = 0;
+			msg.m_DataOut.StartWriting( data.Base(), data.Count() );
+			msg.m_DataOut.SetAssertOnOverflow( false );
+			int lastEntry = -1;
+			while ( entry < table->GetNumStrings() )
+			{
+				const int startBit = msg.m_DataOut.GetNumBitsWritten();
+				if ( !WriteDemoStringTableEntry( table, entry, lastEntry, msg.m_DataOut ) )
+				{
+					Warning( "Failed to record string table '%s': invalid entry %d.\n", table->GetTableName(), entry );
+					StopRecording();
+					return;
+				}
+				if ( msg.m_DataOut.GetNumBitsWritten() > maxUpdateBits )
+				{
+					msg.m_DataOut.SeekToBit( startBit );
+					break;
+				}
+				lastEntry = entry++;
+				++msg.m_nChangedEntries;
+			}
 
-	if ( dataLen > DEMO_FILE_MAX_STRINGTABLE_SIZE )
-	{
-		Warning( "Failed to RecordStringTables. Trying to record string table that's bigger than max string table size\n" );
+			bf_write packet( packetData.Base(), packetData.Count() );
+			packet.SetAssertOnOverflow( false );
+			if ( msg.m_nChangedEntries == 0 || !msg.WriteToBuffer( packet ) )
+			{
+				Warning( "Failed to record string table '%s': update exceeds protocol limits.\n", table->GetTableName() );
+				StopRecording();
+				return;
+			}
+			WriteMessages( packet );
+		}
 	}
-
-	free(data);
 }
 
 void CDemoRecorder::RecordUserInput( int cmdnumber )
@@ -621,6 +687,8 @@ void CDemoRecorder::StartupDemoFile( void )
 	m_DemoFile.WriteCmdHeader( dem_synctick, 0 );
 	
 	RecordStringTables();
+	if ( !m_bRecording )
+		return;
 
 	// Demo playback should read this as an incoming message.
 	WriteDemoCvars(); // save all cvars marked with FCVAR_DEMO
