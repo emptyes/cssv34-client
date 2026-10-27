@@ -1125,6 +1125,22 @@ void CVisibleShadowList::PrioritySort()
 		m_PriorityIndex.AddToTail(i);
 	}
 
+	// Selection sort leaves an already descending list unchanged, including ties.
+	// Use the bit-based SDK finite check even when compiled with /fp:fast.
+	bool bAlreadySorted = true;
+	for ( i = 1; i < nCount; ++i )
+	{
+		if ( !IsFinite( m_ShadowsInView[i - 1].m_flArea ) ||
+			 !IsFinite( m_ShadowsInView[i].m_flArea ) ||
+			 !( m_ShadowsInView[i - 1].m_flArea >= m_ShadowsInView[i].m_flArea ) )
+		{
+			bAlreadySorted = false;
+			break;
+		}
+	}
+	if ( bAlreadySorted )
+		return;
+
 	for ( i = 0; i < nCount - 1; ++i )
 	{
 		int nLargestInd = i;
