@@ -323,15 +323,12 @@ void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCu
 	}
 	else
 	{
-		Vector hitpos;
-
-		VectorMA( pTrace->startpos, pTrace->fraction, dir, hitpos );
+		Vector hitpos = pTrace->endpos;
 		VectorNormalize( dir );
-
-		dir *= 4000;  // adjust impact strenght
+		Vector force = dir * 4000;
 
 		// apply force where we hit it
-		pPhysicsObject->ApplyForceOffset( dir, hitpos );
+		pPhysicsObject->ApplyForceOffset( force, hitpos );
 
 		// Blood spray!
 		FX_CS_BloodSpray( hitpos, dir, 10 );
@@ -572,7 +569,10 @@ void C_CSRagdoll::OnDataChanged( DataUpdateType_t type )
 		// until the first render. 
 		if ( engine->IsPlayingDemo() && m_bCreatedWhilePlaybackSkipping )
 		{
-			Release();
+			// cs_ragdoll is a networked entity: releasing it on the client breaks later
+			// delta updates ("CL_PreserveExistingEntity: missing client entity").
+			// Just hide it instead of deleting it.
+			AddEffects( EF_NODRAW );
 			return;
 		}
 
