@@ -232,8 +232,9 @@ bool CUtlStreamBuffer::StreamPutOverflow( int nSize )
 		GrowAllocatedSize( nSize + 2 );
 	}
 
-	// Don't write the last byte (for NULL termination logic to work)
-	int nBytesToWrite = TellPut() - m_nOffset - 1;
+	int nBytesToWrite = TellPut() - m_nOffset;
+	if ( nSize >= 0 )
+		--nBytesToWrite;
 	if ( ( nBytesToWrite > 0 ) || ( nSize < 0 ) )
 	{
 		if ( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
@@ -254,12 +255,15 @@ bool CUtlStreamBuffer::StreamPutOverflow( int nSize )
 		}
 
 		// This is necessary to deal with auto-NULL terminiation
-		m_Memory[0] = *(unsigned char*)PeekPut( -1 );
-		if ( TellPut() < Size() )
+		if ( nSize >= 0 )
 		{
-			m_Memory[1] = *(unsigned char*)PeekPut( );
+			m_Memory[0] = *(unsigned char*)PeekPut( -1 );
+			if ( TellPut() - m_nOffset < Size() )
+			{
+				m_Memory[1] = *(unsigned char*)PeekPut( );
+			}
+			m_nOffset = TellPut() - 1;
 		}
-		m_nOffset = TellPut() - 1;
 	}
 
 	if ( nSize < 0 )
