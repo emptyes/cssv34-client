@@ -42,6 +42,8 @@ extern ConVar sv_lan;
 #define IsLan() sv_lan.GetInt()
 #endif
 
+#define MASTER_SERVER "144.31.238.180:27011"
+
 //-----------------------------------------------------------------------------
 // Purpose: Implements the master server interface
 //-----------------------------------------------------------------------------
@@ -131,7 +133,7 @@ void CMaster::RunFrame()
 	{
 		static sockaddr fromAddr{};
 		static char buffer[2048];
-#if __defined(aarch64) && __defined(ANDROID)
+#if defined(aarch64) && defined(ANDROID)
 		unsigned int fromLen = sizeof(fromAddr);
 #else
 		int fromLen = sizeof(fromAddr);
@@ -468,7 +470,7 @@ bool CMaster::ProcessConnectionlessPacket( netpacket_t *packet )
 				msg.WriteString(startadr.ToString());
 				msg.WriteString(va("\\gamedir\\%s", COM_GetModDirectory()));
 
-				netadr_t adr("78.154.103.37:10232");
+				netadr_t adr(MASTER_SERVER);
 				sockaddr to;
 				adr.ToSockadr(&to);
 
@@ -662,7 +664,7 @@ void CMaster::RequestInternetServerList(const char *gamedir, IServerListResponse
 	msg.WriteString("0.0.0.0:0");
 	msg.WriteString(va("\\gamedir\\%s", COM_GetModDirectory()));
 
-	netadr_t adr("78.154.103.37:10232");
+	netadr_t adr(MASTER_SERVER);
 	sockaddr to;
 	adr.ToSockadr(&to);
 
