@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Â© 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -70,8 +70,14 @@ BEGIN_NETWORK_TABLE( CWeaponGlock, DT_WeaponGlock )
 	#endif
 END_NETWORK_TABLE()
 
+#ifdef CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponGlock )
+	DEFINE_PRED_FIELD( m_bBurstMode, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_iGlock18ShotsFired, FIELD_INTEGER, 0 ),
+	DEFINE_PRED_FIELD( m_flGlock18Shoot, FIELD_FLOAT, 0 ),
+	DEFINE_PRED_FIELD( m_flLastFire, FIELD_FLOAT, 0 ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_glock, CWeaponGlock );
 PRECACHE_WEAPON_REGISTER( weapon_glock );

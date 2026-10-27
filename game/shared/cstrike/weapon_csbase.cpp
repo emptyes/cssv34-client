@@ -288,6 +288,9 @@ BEGIN_PREDICTION_DATA( CWeaponCSBase )
 	DEFINE_PRED_FIELD( m_flNextSecondaryAttack, FIELD_FLOAT, FTYPEDESC_OVERRIDE | FTYPEDESC_NOERRORCHECK ),
 	DEFINE_PRED_FIELD( m_bDelayFire, FIELD_BOOLEAN, 0 ),
 	DEFINE_PRED_FIELD( m_flAccuracy, FIELD_FLOAT, 0 ),
+	DEFINE_PRED_FIELD( m_flDecreaseShotsFired, FIELD_FLOAT, 0 ),
+	// CNetworkVar storage, but not present in DT_WeaponCSBase.
+	DEFINE_PRED_FIELD( m_fAccuracyPenalty, FIELD_FLOAT, 0 ),
 END_PREDICTION_DATA()
 #endif
 

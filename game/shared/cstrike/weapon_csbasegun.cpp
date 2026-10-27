@@ -20,8 +20,11 @@ IMPLEMENT_NETWORKCLASS_ALIASED( WeaponCSBaseGun, DT_WeaponCSBaseGun )
 BEGIN_NETWORK_TABLE( CWeaponCSBaseGun, DT_WeaponCSBaseGun )
 END_NETWORK_TABLE()
 
+#ifdef CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponCSBaseGun )
+	DEFINE_PRED_FIELD( m_zoomFullyActiveTime, FIELD_FLOAT, 0 ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_csbase_gun, CWeaponCSBaseGun );
 
@@ -182,8 +185,6 @@ bool CWeaponCSBaseGun::Reload()
 
 	if (pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0)
 		return false;
-
-	pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.0f );
 
 	int iResult = DefaultReload( GetMaxClip1(), GetMaxClip2(), ACT_VM_RELOAD );
 	if ( !iResult )
