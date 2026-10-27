@@ -94,7 +94,7 @@ CAudioSourceMP3::CAudioSourceMP3( CSfxTable *pSfx )
 	m_dataStart = 0;
 
 	intp file = g_pSndIO->open( pSfx->GetFileName() );
-	if ( file != -1 )
+	if ( file != 0 && file != -1 )
 	{
 		m_dataSize = g_pSndIO->size( file );
 		g_pSndIO->close( file );
@@ -112,6 +112,7 @@ CAudioSourceMP3::CAudioSourceMP3( CSfxTable *pSfx )
 	m_bIsPlayOnce = false;
 	m_bIsSentenceWord = false;
 	m_bCheckedForPendingSentence = false;
+	m_bTriedHeaderSampleRate = false;
 }
 
 CAudioSourceMP3::CAudioSourceMP3( CSfxTable *pSfx, CAudioSourceCachedInfo *info )
@@ -126,6 +127,7 @@ CAudioSourceMP3::CAudioSourceMP3( CSfxTable *pSfx, CAudioSourceCachedInfo *info 
 	m_nCachedDataSize = 0;
 	m_bIsPlayOnce = false;
 	m_bCheckedForPendingSentence = false;
+	m_bTriedHeaderSampleRate = false;
 
 	CheckAudioSourceCache();
 }
@@ -195,8 +197,69 @@ void CAudioSourceMP3::SetSentence( CSentence *pSentence )
 	info->SetSentence( pNewSentence );
 }
 
+static int MP3_ReadSampleRateFromHeader( const char *pFileName )
+{
+	intp file = g_pSndIO->open( pFileName );
+	if ( file == 0 || file == -1 )
+		return 0;
+
+	unsigned char buf[4096];
+	unsigned int offset = 0;
+
+	// Skip ID3v2 tag if present
+	int nRead = g_pSndIO->read( buf, 10, file );
+	if ( nRead == 10 && buf[0] == 'I' && buf[1] == 'D' && buf[2] == '3' )
+	{
+		offset = 10 + ( ( ( buf[6] & 0x7f ) << 21 ) | ( ( buf[7] & 0x7f ) << 14 ) | ( ( buf[8] & 0x7f ) << 7 ) | ( buf[9] & 0x7f ) );
+		if ( buf[5] & 0x10 )
+			offset += 10; // ID3v2.4 footer
+	}
+
+	g_pSndIO->seek( file, offset );
+	nRead = g_pSndIO->read( buf, sizeof( buf ), file );
+	g_pSndIO->close( file );
+
+	// [version][index]; version: 0 = MPEG 2.5, 1 = reserved, 2 = MPEG 2, 3 = MPEG 1
+	static const int s_nRates[4][3] =
+	{
+		{ 11025, 12000, 8000 },
+		{ 0, 0, 0 },
+		{ 22050, 24000, 16000 },
+		{ 44100, 48000, 32000 },
+	};
+
+	for ( int i = 0; i + 3 < nRead; i++ )
+	{
+		if ( buf[i] != 0xFF || ( buf[i + 1] & 0xE0 ) != 0xE0 )
+			continue;
+
+		int nVersion = ( buf[i + 1] >> 3 ) & 3;
+		int nLayer = ( buf[i + 1] >> 1 ) & 3;
+		int nBitrate = ( buf[i + 2] >> 4 ) & 0xF;
+		int nRateIdx = ( buf[i + 2] >> 2 ) & 3;
+		if ( nVersion == 1 || nLayer == 0 || nBitrate == 0xF || nRateIdx == 3 )
+			continue;
+
+		return s_nRates[nVersion][nRateIdx];
+	}
+
+	return 0;
+}
+
+
+
 int CAudioSourceMP3::SampleRate()
 {
+	if ( !m_sampleRate && !m_bTriedHeaderSampleRate )
+	{
+		m_bTriedHeaderSampleRate = true;
+		m_sampleRate = MP3_ReadSampleRateFromHeader( m_pSfx->GetFileName() );
+	}
+
+	// File is missing: don't build a temporary mixer (sync I/O) on every call
+	if ( !m_sampleRate && m_dataSize == 0 )
+		return 0;
+
 	if ( !m_sampleRate )
 	{
 		// This should've come from the sound cache. We can avoid sync I/O jank if and only if we've started streaming
