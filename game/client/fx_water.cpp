@@ -16,6 +16,9 @@
 #include "tier0/vprof.h"
 #include "fx.h"
 #include "fx_water.h"
+#include "particles_simple.h"
+#include "particle_util.h"
+#include "view.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -80,6 +83,78 @@ void UTIL_GetNormalizedColorTintAndLuminosity( const Vector &color, Vector *tint
 //			&normal - 
 //			scale - 
 //-----------------------------------------------------------------------------
+class CWaterRippleEmitter : public CParticleEffect
+{
+public:
+	CWaterRippleEmitter( const Vector &normal, const Vector &color, float scale, float lifetime, float alpha, float yaw, float deltaYaw )
+		: CParticleEffect( "WaterRipple" ), m_Normal( normal ), m_Color( color ), m_Scale( scale ),
+		m_Lifetime( lifetime ), m_Alpha( alpha ), m_Yaw( yaw ), m_DeltaYaw( deltaYaw ), m_Elapsed( 0.0f )
+	{
+		GetBinding().SetEffectCameraSpace( false );
+	}
+
+	virtual void SimulateParticles( CParticleSimulateIterator *pIterator )
+	{
+		m_Elapsed += pIterator->GetTimeDelta();
+		for ( Particle *pParticle = pIterator->GetFirst(); pParticle; pParticle = pIterator->GetNext() )
+		{
+			if ( m_Elapsed >= m_Lifetime )
+				pIterator->RemoveParticle( pParticle );
+		}
+	}
+
+	virtual void RenderParticles( CParticleRenderIterator *pIterator )
+	{
+		float fraction = clamp( m_Elapsed / m_Lifetime, 0.0f, 1.0f );
+		float size = m_Scale * ( 16.0f + 112.0f * Bias( fraction, 0.7f ) );
+		float alpha = clamp( m_Alpha * ( 1.0f - Bias( fraction, 0.25f ) ), 0.0f, 1.0f );
+		float yaw = DEG2RAD( anglemod( m_Yaw + m_DeltaYaw * m_Elapsed ) );
+		Vector right, up;
+		VectorVectors( m_Normal, right, up );
+		Vector rotatedRight = ( right * cos( yaw ) - up * sin( yaw ) ) * ( size * 0.5f );
+		Vector rotatedUp = ( right * cos( yaw + M_PI * 0.5f ) - up * sin( yaw + M_PI * 0.5f ) ) * ( size * 0.5f );
+
+		ParticleDraw *pDraw = pIterator->GetParticleDraw();
+		const Particle *pParticle = pIterator->GetFirst();
+		while ( pParticle )
+		{
+			CMeshBuilder *pBuilder = pDraw->GetMeshBuilder();
+			if ( pBuilder && alpha > 0.0f )
+			{
+				Vector vertices[4] = {
+					pParticle->m_Pos + rotatedRight - rotatedUp,
+					pParticle->m_Pos - rotatedRight - rotatedUp,
+					pParticle->m_Pos - rotatedRight + rotatedUp,
+					pParticle->m_Pos + rotatedRight + rotatedUp
+				};
+				float color[4] = { m_Color.x, m_Color.y, m_Color.z, alpha };
+				for ( int i = 0; i < 4; ++i )
+				{
+					pBuilder->Position3fv( vertices[i].Base() );
+					pBuilder->Normal3fv( m_Normal.Base() );
+					pBuilder->TexCoord2f( 0,
+						( i == 0 || i == 3 ) ? pDraw->m_pSubTexture->m_tCoordMaxs[0] : pDraw->m_pSubTexture->m_tCoordMins[0],
+						( i < 2 ) ? pDraw->m_pSubTexture->m_tCoordMaxs[1] : pDraw->m_pSubTexture->m_tCoordMins[1] );
+					pBuilder->Color4fv( color );
+					pBuilder->AdvanceVertex();
+				}
+			}
+			float sortKey = CurrentViewForward().Dot( CurrentViewOrigin() - pParticle->m_Pos );
+			pParticle = pIterator->GetNext( sortKey );
+		}
+	}
+
+private:
+	Vector m_Normal;
+	Vector m_Color;
+	float m_Scale;
+	float m_Lifetime;
+	float m_Alpha;
+	float m_Yaw;
+	float m_DeltaYaw;
+	float m_Elapsed;
+};
+
 void FX_WaterRipple( const Vector &origin, float scale, Vector *pColor, float flLifetime, float flAlpha )
 {
 	VPROF_BUDGET( "FX_WaterRipple", VPROF_BUDGETGROUP_PARTICLE_RENDERING );
@@ -94,21 +169,16 @@ void FX_WaterRipple( const Vector &origin, float scale, Vector *pColor, float fl
 	
 	if ( tr.fraction < 1.0f )
 	{
-		//Add a ripple quad to the surface
-		FX_AddQuad( tr.endpos + ( tr.plane.normal * 0.5f ), 
-					tr.plane.normal, 
-					16.0f*scale, 
-					128.0f*scale, 
-					0.7f,
-					flAlpha,	// start alpha
-					0.0f,		// end alpha
-					0.25f,
-					random->RandomFloat( 0, 360 ),
-					random->RandomFloat( -16.0f, 16.0f ),
-					color, 
-					flLifetime, 
-					"effects/splashwake1", 
-					(FXQUAD_BIAS_SCALE|FXQUAD_BIAS_ALPHA) );
+		if ( flLifetime <= 0.0f || scale <= 0.0f )
+			return;
+
+		Vector position = tr.endpos + tr.plane.normal * 0.5f;
+		CSmartPtr<CWaterRippleEmitter> emitter = new CWaterRippleEmitter( tr.plane.normal, color, scale,
+			flLifetime, flAlpha, random->RandomFloat( 0, 360 ), random->RandomFloat( -16.0f, 16.0f ) );
+		emitter->SetSortOrigin( position );
+		Vector extent( 128.0f * scale, 128.0f * scale, 128.0f * scale );
+		emitter->GetBinding().SetBBox( position - extent, position + extent );
+		emitter->AddParticle( sizeof(Particle), emitter->GetPMaterial( "effects/splashwake1" ), position );
 	}
 }
 
