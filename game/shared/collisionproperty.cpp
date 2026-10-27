@@ -1080,7 +1080,14 @@ void CCollisionProperty::ComputeSurroundingBox( Vector *pVecWorldMins, Vector *p
 		break;
 
 	case USE_HITBOXES:
+#ifdef CLIENT_DLL
+		if ( !ComputeHitboxSurroundingBox( pVecWorldMins, pVecWorldMaxs ) )
+		{
+			ComputeCollisionSurroundingBox( GetSolid() == SOLID_VPHYSICS, pVecWorldMins, pVecWorldMaxs );
+		}
+#else
 		ComputeHitboxSurroundingBox( pVecWorldMins, pVecWorldMaxs );
+#endif
 		break;
 
 	case USE_ROTATION_EXPANDED_BOUNDS:
