@@ -976,7 +976,7 @@ bool CViewRender::ShouldDrawViewModel( bool bDrawViewmodel )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-bool CViewRender::UpdateRefractIfNeededByList( CUtlVector< IClientRenderable * > &list )
+bool CViewRender::UpdateRefractIfNeededByList( CUtlVectorFixedGrowable< IClientRenderable *, 32 > &list )
 {
 	int nCount = list.Count();
 	for( int i=0; i < nCount; ++i )
@@ -1000,7 +1000,7 @@ bool CViewRender::UpdateRefractIfNeededByList( CUtlVector< IClientRenderable * >
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CViewRender::DrawRenderablesInList( CUtlVector< IClientRenderable * > &list, int flags )
+void CViewRender::DrawRenderablesInList( CUtlVectorFixedGrowable< IClientRenderable *, 32 > &list, int flags )
 {
 	Assert( m_pCurrentlyDrawingEntity == NULL );
 	int nCount = list.Count();
@@ -1085,8 +1085,8 @@ void CViewRender::DrawViewModels( const CViewSetup &view, bool drawViewmodel )
 	if ( bShouldDrawPlayerViewModel || bShouldDrawToolViewModels )
 	{
 
-		CUtlVector< IClientRenderable * > opaqueViewModelList( 32 );
-		CUtlVector< IClientRenderable * > translucentViewModelList( 32 );
+		CUtlVectorFixedGrowable< IClientRenderable *, 32 > opaqueViewModelList( 32 );
+		CUtlVectorFixedGrowable< IClientRenderable *, 32 > translucentViewModelList( 32 );
 
 		ClientLeafSystem()->CollateViewModelRenderables( opaqueViewModelList, translucentViewModelList );
 

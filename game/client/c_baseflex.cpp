@@ -524,13 +524,13 @@ void *CFlexSceneFileManager::FindSceneFile( IHasLocalToGlobalFlexSettings *insta
 //-----------------------------------------------------------------------------
 void CFlexSceneFileManager::DeleteSceneFiles()
 {
-	while ( m_FileList.Count() > 0 )
+	for ( int i = 0; i < m_FileList.Count(); ++i )
 	{
-		CFlexSceneFile *file = m_FileList[ 0 ];
-		m_FileList.Remove( 0 );
+		CFlexSceneFile *file = m_FileList[ i ];
 		free( file->buffer );
 		delete file;
 	}
+	m_FileList.RemoveAll();
 }
 
 CFlexSceneFileManager g_FlexSceneFileManager;

@@ -553,7 +553,7 @@ void CClient_Precipitation::CreateWaterSplashes()
 			FX_WaterRipple( vSplash, g_flSplashScale, &g_vSplashColor, g_flSplashLifetime, g_flSplashAlpha );
 		}
 	}
-	m_Splashes.Purge();
+	m_Splashes.RemoveAll();
 }
 
 

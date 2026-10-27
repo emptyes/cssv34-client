@@ -169,7 +169,7 @@ public:
 	virtual void BuildRenderablesList( const SetupRenderInfo_t &info ) = 0;
 
 	// Put renderables in the leaf into their appropriate lists.
-	virtual void CollateViewModelRenderables( CUtlVector< IClientRenderable * >& opaqueList, CUtlVector< IClientRenderable * >& translucentList ) = 0;
+	virtual void CollateViewModelRenderables( CUtlVectorFixedGrowable< IClientRenderable *, 32 >& opaqueList, CUtlVectorFixedGrowable< IClientRenderable *, 32 >& translucentList ) = 0;
 
 	// Call this to deactivate static prop rendering..
 	virtual void DrawStaticProps( bool enable ) = 0;

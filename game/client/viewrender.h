@@ -463,8 +463,8 @@ private:
 	// Determines what kind of water we're going to use
 	void			DetermineWaterRenderInfo( const VisibleFogVolumeInfo_t &fogVolumeInfo, WaterRenderInfo_t &info );
 
-	bool			UpdateRefractIfNeededByList( CUtlVector< IClientRenderable * > &list );
-	void			DrawRenderablesInList( CUtlVector< IClientRenderable * > &list, int flags = 0 );
+	bool			UpdateRefractIfNeededByList( CUtlVectorFixedGrowable< IClientRenderable *, 32 > &list );
+	void			DrawRenderablesInList( CUtlVectorFixedGrowable< IClientRenderable *, 32 > &list, int flags = 0 );
 
 	// Sets up, cleans up the main 3D view
 	void			SetupMain3DView( const CViewSetup &view, int &nClearFlags );

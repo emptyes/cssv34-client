@@ -109,7 +109,7 @@ public:
 	virtual void RenderableChanged( ClientRenderHandle_t handle );
 	virtual void SetRenderGroup( ClientRenderHandle_t handle, RenderGroup_t group );
 	virtual void ComputeTranslucentRenderLeaf( int count, const LeafIndex_t *pLeafList, const LeafFogVolume_t *pLeafFogVolumeList, int frameNumber, int viewID );
-	virtual void CollateViewModelRenderables( CUtlVector< IClientRenderable * >& opaque, CUtlVector< IClientRenderable * >& translucent );
+	virtual void CollateViewModelRenderables( CUtlVectorFixedGrowable< IClientRenderable *, 32 >& opaque, CUtlVectorFixedGrowable< IClientRenderable *, 32 >& translucent );
 	virtual void BuildRenderablesList( const SetupRenderInfo_t &info );
 			void CollateRenderablesInLeaf( int leaf, int worldListLeafIndex, const SetupRenderInfo_t &info );
 	virtual void DrawStaticProps( bool enable );
@@ -1445,7 +1445,7 @@ inline void AddRenderableToRenderList( CClientRenderablesList &renderList, IClie
 // Input  : renderList - 
 //			renderGroup - 
 //-----------------------------------------------------------------------------
-void CClientLeafSystem::CollateViewModelRenderables( CUtlVector< IClientRenderable * >& opaque, CUtlVector< IClientRenderable * >& translucent )
+void CClientLeafSystem::CollateViewModelRenderables( CUtlVectorFixedGrowable< IClientRenderable *, 32 >& opaque, CUtlVectorFixedGrowable< IClientRenderable *, 32 >& translucent )
 {
 	for ( int i = m_ViewModels.Count()-1; i >= 0; --i )
 	{
