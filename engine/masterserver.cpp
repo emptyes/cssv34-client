@@ -133,11 +133,7 @@ void CMaster::RunFrame()
 	{
 		static sockaddr fromAddr{};
 		static char buffer[2048];
-#if defined(aarch64) && defined(ANDROID)
-		unsigned int fromLen = sizeof(fromAddr);
-#else
-		int fromLen = sizeof(fromAddr);
-#endif
+		socklen_t fromLen = sizeof(fromAddr);
 		int nBytes = 0;
 #ifndef ANDROID
 		// other: read until no packets
