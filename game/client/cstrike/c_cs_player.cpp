@@ -1055,6 +1055,7 @@ void C_CSPlayer::CreateAddonModel( int i )
 		return;
 
 	C_BreakableProp *pEnt = new C_BreakableProp;
+	bool bInitialized = false;
 
 	int addonType = (1<<i);
 	if ( addonType == ADDON_PISTOL || addonType == ADDON_PRIMARY )
@@ -1068,22 +1069,22 @@ void C_CSPlayer::CreateAddonModel( int i )
 		}
 		if ( weaponInfo->m_szAddonModel[0] == 0 )
 		{
-			pEnt->InitializeAsClientEntity( weaponInfo->szWorldModel, RENDER_GROUP_OPAQUE_ENTITY );
+			bInitialized = pEnt->InitializeAsClientEntity( weaponInfo->szWorldModel, RENDER_GROUP_OPAQUE_ENTITY );
 		}
 		else
 		{
-			pEnt->InitializeAsClientEntity( weaponInfo->m_szAddonModel, RENDER_GROUP_OPAQUE_ENTITY );
+			bInitialized = pEnt->InitializeAsClientEntity( weaponInfo->m_szAddonModel, RENDER_GROUP_OPAQUE_ENTITY );
 		}
 	}
 	else if( pAddonInfo->m_pModelName )
 	{
 		if ( addonType == ADDON_PISTOL2 && !(m_iAddonBits & ADDON_PISTOL ) )
 		{
-			pEnt->InitializeAsClientEntity( pAddonInfo->m_pHolsterName, RENDER_GROUP_OPAQUE_ENTITY );
+			bInitialized = pEnt->InitializeAsClientEntity( pAddonInfo->m_pHolsterName, RENDER_GROUP_OPAQUE_ENTITY );
 		}
 		else
 		{
-			pEnt->InitializeAsClientEntity( pAddonInfo->m_pModelName, RENDER_GROUP_OPAQUE_ENTITY );
+			bInitialized = pEnt->InitializeAsClientEntity( pAddonInfo->m_pModelName, RENDER_GROUP_OPAQUE_ENTITY );
 		}
 	}
 	else
@@ -1091,6 +1092,7 @@ void C_CSPlayer::CreateAddonModel( int i )
 		WEAPON_FILE_INFO_HANDLE	hWpnInfo = LookupWeaponInfoSlot( pAddonInfo->m_pWeaponClassName );
 		if ( hWpnInfo == GetInvalidWeaponInfoHandle() )
 		{
+			pEnt->Release();
 			Assert( false );
 			return;
 		}
@@ -1099,9 +1101,9 @@ void C_CSPlayer::CreateAddonModel( int i )
 		if ( pWeaponInfo )
 		{
 			if ( pWeaponInfo->m_szAddonModel[0] == 0 )
-				pEnt->InitializeAsClientEntity( pWeaponInfo->szWorldModel, RENDER_GROUP_OPAQUE_ENTITY );
+				bInitialized = pEnt->InitializeAsClientEntity( pWeaponInfo->szWorldModel, RENDER_GROUP_OPAQUE_ENTITY );
 			else
-				pEnt->InitializeAsClientEntity( pWeaponInfo->m_szAddonModel, RENDER_GROUP_OPAQUE_ENTITY );
+				bInitialized = pEnt->InitializeAsClientEntity( pWeaponInfo->m_szAddonModel, RENDER_GROUP_OPAQUE_ENTITY );
 		}
 		else
 		{
@@ -1109,6 +1111,12 @@ void C_CSPlayer::CreateAddonModel( int i )
 			Warning( "C_CSPlayer::CreateAddonModel: Unable to get weapon info for %s.\n", pAddonInfo->m_pWeaponClassName );
 			return;
 		}
+	}
+
+	if ( !bInitialized )
+	{
+		pEnt->Release();
+		return;
 	}
 
 	if ( Q_strcmp( pAddonInfo->m_pAttachmentName, "c4" ) )
