@@ -127,12 +127,17 @@ bool C_LowViolenceHostageDeathModel::SetupLowViolenceModel( C_CHostage *pHostage
 		CStudioHdr *pStudioHdr = GetModelPtr();
 
 		// update pose parameters
-		float poseParameter[MAXSTUDIOPOSEPARAM];
-		GetPoseParameters( pStudioHdr, poseParameter );
-		for ( int i=0; i<NumInterestingPoseParameters; ++i )
+		int nPoseParameters = pStudioHdr ? pStudioHdr->GetNumPoseParameters() : 0;
+		if ( nPoseParameters > 0 && nPoseParameters <= MAXSTUDIOPOSEPARAM )
 		{
-			int poseParameterIndex = LookupPoseParameter( pStudioHdr, InterestingPoseParameters[i] );
-			SetPoseParameter( pStudioHdr, poseParameterIndex, poseParameter[poseParameterIndex] );
+			float poseParameter[MAXSTUDIOPOSEPARAM];
+			GetPoseParameters( pStudioHdr, poseParameter );
+			for ( int i=0; i<NumInterestingPoseParameters; ++i )
+			{
+				int poseParameterIndex = LookupPoseParameter( pStudioHdr, InterestingPoseParameters[i] );
+				if ( poseParameterIndex >= 0 && poseParameterIndex < nPoseParameters )
+					SetPoseParameter( pStudioHdr, poseParameterIndex, poseParameter[poseParameterIndex] );
+			}
 		}
 	}
 
