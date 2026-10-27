@@ -79,7 +79,8 @@ C_PlayerResource::C_PlayerResource()
 //-----------------------------------------------------------------------------
 C_PlayerResource::~C_PlayerResource()
 {
-	g_PR = NULL;
+	if ( g_PR == this )
+		g_PR = NULL;
 }
 
 void C_PlayerResource::OnDataChanged(DataUpdateType_t updateType)

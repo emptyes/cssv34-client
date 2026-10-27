@@ -810,8 +810,6 @@ C_CSPlayer::C_CSPlayer() :
 
 	m_serverIntendedCycle = -1.0f;
 
-	view->SetScreenOverlayMaterial( NULL );
-
     m_bPlayingFreezeCamSound = false;
 }
 
@@ -2188,7 +2186,11 @@ void C_CSPlayer::Simulate( void )
 			int iAttachment = LookupAttachment( "muzzle_flash" );
 
 			if ( iAttachment < 0 )
+			{
+				ReleaseFlashlight();
+				BaseClass::Simulate();
 				return;
+			}
 
 			Vector vecOrigin;
 			QAngle dummy;
@@ -2275,7 +2277,7 @@ bool C_CSPlayer::HasC4( void )
 	{
 		C_CS_PlayerResource *pCSPR = (C_CS_PlayerResource*)GameResources();
 
-		return pCSPR->HasC4( entindex() );
+		return pCSPR && pCSPR->HasC4( entindex() );
 	}
 }
 
