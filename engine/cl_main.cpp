@@ -907,7 +907,7 @@ CON_COMMAND_F( redirect, "Redirect client to specified server.", FCVAR_DONTRECOR
 	{
 		ConMsg( "Usage:  redirect <server>\n" );
 	}
-	vecArgs.PurgeAndDeleteElements();
+	vecArgs.PurgeAndDeleteElementsArray();
 }
 
 //-----------------------------------------------------------------------------
