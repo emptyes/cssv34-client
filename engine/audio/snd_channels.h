@@ -151,7 +151,7 @@ public:
 	short	m_list[MAX_CHANNELS];
 	bool	m_quashed[MAX_CHANNELS]; // if true, the channel should be advanced, but not mixed, because it's been heuristically suppressed
 
-	CUtlVector< int >	m_nSpecialDSPs;
+	CUtlVectorFixedGrowable< int, 8 >	m_nSpecialDSPs;
 
 	bool	m_hasSpeakerChannels : 1;
 	bool	m_hasDryChannels : 1;

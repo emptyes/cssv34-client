@@ -2287,7 +2287,7 @@ void Shader_DrawTranslucentSurfaces( IWorldRenderList *pRenderListIn, int sortIn
 	// means it's closer. We want to render closer things first to get
 	// fast z-reject.
 	int i;
-	CUtlVector<msurface2_t *> surfaceList;
+	CUtlVectorFixedGrowable<msurface2_t *, 128> surfaceList;
 	for ( i = 0; i < MAX_MAT_SORT_GROUPS; ++i )
 	{
 		if( !( flags & ( 1 << i ) ) )
@@ -2360,7 +2360,10 @@ void Shader_DrawTranslucentSurfaces( IWorldRenderList *pRenderListIn, int sortIn
 			g_pShadowMgr->ClearShadowRenderList();
 		}
 		// Draw wireframe, etc information
-		DrawDebugInformation( surfaceList );
+		{
+			CUtlVector<msurface2_t *> debugSurfaceList( surfaceList.Base(), surfaceList.Count(), surfaceList.Count() );
+			DrawDebugInformation( debugSurfaceList );
+		}
 
 		// Now draw the translucent displacements; we need to do these *after* the
 		// non-displacement surfaces because most likely the displacement will always
@@ -3724,7 +3727,10 @@ public:
 		renderT.surfaceCount = 0;
 		renderT.batchCount = 0;
 		renderT.decalSurfaceCount = 0;
-		BuildTransLists_r( renderT, model, model->brush.pShared->nodes + model->brush.firstnode );
+		{
+			CUtlVectorFixedGrowable<surfacelist_t, 256> sortList;
+			BuildTransLists_r( renderT, model, model->brush.pShared->nodes + model->brush.firstnode, sortList );
+		}
 		void *pProxyData = baseentity ? baseentity->GetClientRenderable() : NULL;
 		DrawTransLists( renderT, pProxyData );
 	}
@@ -3772,7 +3778,7 @@ public:
 	}
 
 	// build node lists
-	void BuildTransLists_r( transrender_t &renderT, model_t *model, mnode_t *node )
+	void BuildTransLists_r( transrender_t &renderT, model_t *model, mnode_t *node, CUtlVectorFixedGrowable<surfacelist_t, 256> &sortList )
 	{
 		float		dot;
 
@@ -3795,10 +3801,10 @@ public:
 
 		// back side first - translucent surfaces need to render in back to front order
 		// to appear correctly.
-		BuildTransLists_r( renderT, model, node->children[!side]);
+		BuildTransLists_r( renderT, model, node->children[!side], sortList );
 
 		// emit all surfaces on node
-		CUtlVectorFixedGrowable<surfacelist_t, 256> sortList;
+		sortList.RemoveAll();
 		SurfaceHandle_t surfID = SurfaceHandleFromIndex( node->firstsurface, model->brush.pShared );
 		for ( int i = 0; i < node->numsurfaces; i++, surfID++ )
 		{
@@ -3863,7 +3869,7 @@ public:
 		}
 
 		// front side
-		BuildTransLists_r( renderT, model, node->children[side]);
+		BuildTransLists_r( renderT, model, node->children[side], sortList );
 	}
 
 	void DrawTransLists( transrender_t &renderT, void *pProxyData )

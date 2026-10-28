@@ -260,12 +260,25 @@ class CWorldListCache
 {
 public:
 	CWorldListCache() = default;
+	~CWorldListCache()
+	{
+		m_UnusedEntries.PurgeAndDeleteElements();
+	}
 
 	void Flush()
 	{
 		for ( int i = m_Entries.FirstInorder(); i != m_Entries.InvalidIndex(); i = m_Entries.NextInorder( i ) )
 		{
-			delete m_Entries[i];
+			Entry_t *pEntry = m_Entries[i];
+			if ( m_UnusedEntries.Count() < MAX_REUSABLE_ENTRIES )
+			{
+				pEntry->Reset();
+				m_UnusedEntries.AddToTail( pEntry );
+			}
+			else
+			{
+				delete pEntry;
+			}
 		}
 		m_Entries.RemoveAll();
 	}
@@ -289,16 +302,32 @@ public:
 
 	void Add( const CViewSetup &viewSetup, IWorldRenderList *pList, ClientWorldListInfo_t *pListInfo )
 	{
-		m_Entries.Insert( new Entry_t( viewSetup, pList, pListInfo ) );
+		Entry_t *pEntry;
+		if ( m_UnusedEntries.Count() )
+		{
+			pEntry = m_UnusedEntries.Tail();
+			m_UnusedEntries.RemoveMultipleFromTail( 1 );
+			pEntry->Init( viewSetup, pList, pListInfo );
+		}
+		else
+		{
+			pEntry = new Entry_t( viewSetup, pList, pListInfo );
+		}
+		m_Entries.Insert( pEntry );
 	}
 
 private:
 	struct Entry_t
 	{
-		Entry_t( const CViewSetup &viewSetup, IWorldRenderList *pList = NULL, ClientWorldListInfo_t *pListInfo = NULL ) :
-			pList( ( pList ) ? InlineAddRef( pList ) : NULL ),
-			pListInfo( ( pListInfo ) ? InlineAddRef( pListInfo ) : NULL )
+		Entry_t( const CViewSetup &viewSetup, IWorldRenderList *pList = NULL, ClientWorldListInfo_t *pListInfo = NULL )
 		{
+			Init( viewSetup, pList, pListInfo );
+		}
+
+		void Init( const CViewSetup &viewSetup, IWorldRenderList *pList, ClientWorldListInfo_t *pListInfo )
+		{
+			this->pList = pList ? InlineAddRef( pList ) : NULL;
+			this->pListInfo = pListInfo ? InlineAddRef( pListInfo ) : NULL;
             // @NOTE (toml 8/18/2006): because doing memcmp, need to fill all of the fields and the padding!
 			memset( &m_bOrtho, 0, offsetof(Entry_t, pList ) - offsetof(Entry_t, m_bOrtho ) );
 			m_bOrtho = viewSetup.m_bOrtho;			
@@ -321,10 +350,17 @@ private:
 
 		~Entry_t()
 		{
+			Reset();
+		}
+
+		void Reset()
+		{
 			if ( pList )
 				pList->Release();
 			if ( pListInfo )
 				pListInfo->Release();
+			pList = NULL;
+			pListInfo = NULL;
 		}
 
 		// The fields from CViewSetup that would actually affect the list
@@ -361,6 +397,8 @@ private:
 	};
 
 	CUtlRBTree<Entry_t *, unsigned short, CEntryComparator> m_Entries;
+	enum { MAX_REUSABLE_ENTRIES = 32 };
+	CUtlVectorFixed<Entry_t *, MAX_REUSABLE_ENTRIES> m_UnusedEntries;
 };
 
 CWorldListCache g_WorldListCache;

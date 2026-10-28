@@ -1714,6 +1714,80 @@ void CClientLeafSystem::SortEntities( const Vector &vecRenderOrigin, const Vecto
 		dists[i] = DotProduct( delta, vecRenderForward );
 	}
 
+	if ( nEntities >= 256 )
+	{
+		bool bAllFinite = true;
+		int nOutOfOrder = 0;
+		float flMaxDist = dists[0];
+		for ( i = 0; i < nEntities; ++i )
+		{
+			if ( !IsFinite( dists[i] ) )
+			{
+				bAllFinite = false;
+				break;
+			}
+			if ( dists[i] < flMaxDist )
+				++nOutOfOrder;
+			else
+				flMaxDist = dists[i];
+		}
+		if ( bAllFinite && !nOutOfOrder )
+			return;
+
+		if ( bAllFinite && nOutOfOrder >= nEntities / 16 )
+		{
+			COMPILE_TIME_ASSERT( CClientRenderablesList::MAX_GROUP_ENTITIES <= 65536 );
+			unsigned short *indices = (unsigned short *)stackalloc( 2 * nEntities * sizeof( unsigned short ) );
+			unsigned short *scratch = indices + nEntities;
+			for ( i = 0; i < nEntities; ++i )
+				indices[i] = i;
+
+			// Preserve the original 4/2/1 subsequences and their tie order.
+			for ( int stepSize = 4; stepSize; stepSize >>= 1 )
+			{
+				int count = ( nEntities + stepSize - 1 ) / stepSize;
+				for ( int width = 1; width < count; width *= 2 )
+				{
+					for ( int first = 0; first + width < count; first += 2 * width )
+					{
+						int mid = first + width;
+						int last = MIN( first + 2 * width, count );
+						if ( dists[indices[(mid-1)*stepSize]] <= dists[indices[mid*stepSize]] )
+							continue;
+						int left = first, right = mid;
+						for ( int out = first; out < last; ++out )
+						{
+							if ( right == last || ( left < mid && dists[indices[left*stepSize]] <= dists[indices[right*stepSize]] ) )
+								scratch[out*stepSize] = indices[left++*stepSize];
+							else
+								scratch[out*stepSize] = indices[right++*stepSize];
+						}
+						for ( int out = first; out < last; ++out )
+							indices[out*stepSize] = scratch[out*stepSize];
+					}
+				}
+			}
+
+			for ( i = 0; i < nEntities; ++i )
+			{
+				if ( indices[i] == i )
+					continue;
+				CClientRenderablesList::CEntry entry = pEntities[i];
+				int j = i;
+				while ( indices[j] != i )
+				{
+					int next = indices[j];
+					pEntities[j] = pEntities[next];
+					indices[j] = j;
+					j = next;
+				}
+				pEntities[j] = entry;
+				indices[j] = j;
+			}
+			return;
+		}
+	}
+
 	// H-sort.
 	int stepSize = 4;
 	while( stepSize )
@@ -1723,17 +1797,19 @@ void CClientLeafSystem::SortEntities( const Vector &vecRenderOrigin, const Vecto
 		{
 			if( dists[i] > dists[i+stepSize] )
 			{
-				::V_swap( pEntities[i], pEntities[i+stepSize] );
-				::V_swap( dists[i], dists[i+stepSize] );
+				int j = i;
+				while( j >= stepSize && dists[j-stepSize] > dists[i+stepSize] )
+					j -= stepSize;
 
-				if( i == 0 )
+				CClientRenderablesList::CEntry entry = pEntities[i+stepSize];
+				float dist = dists[i+stepSize];
+				for( int k=i+stepSize; k > j; k -= stepSize )
 				{
-					i = -stepSize;
+					pEntities[k] = pEntities[k-stepSize];
+					dists[k] = dists[k-stepSize];
 				}
-				else
-				{
-					i -= stepSize << 1;
-				}
+				pEntities[j] = entry;
+				dists[j] = dist;
 			}
 		}
 

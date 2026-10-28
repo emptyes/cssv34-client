@@ -1971,6 +1971,7 @@ void CStaticPropMgr::DrawStaticProps_FastPipeline( IClientRenderable **pProps, i
 	if ( count > MAX_OBJECTS )
 	{
 		DrawStaticProps_FastPipeline( pProps + MAX_OBJECTS, count - MAX_OBJECTS, bShadowDepth );
+		count = MAX_OBJECTS;
 	}
 
 	for ( int i = 0; i < count; i++ )

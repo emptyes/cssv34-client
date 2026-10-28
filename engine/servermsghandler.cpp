@@ -598,7 +598,14 @@ bool CClientState::ProcessSounds( SVC_Sounds *msg )
 		return false;
 	}
 
+	enum { LOCAL_SOUND_COUNT = 8 };
+	alignas(SoundInfo_t) byte soundStorage[LOCAL_SOUND_COUNT * sizeof(SoundInfo_t)];
 	CUtlVector< SoundInfo_t > sounds;
+	if ( msg->m_nNumSounds <= LOCAL_SOUND_COUNT )
+	{
+		CUtlVector< SoundInfo_t > localSounds( reinterpret_cast<SoundInfo_t *>( soundStorage ), LOCAL_SOUND_COUNT );
+		sounds.Swap( localSounds );
+	}
 
 	int startbit = msg->m_DataIn.GetNumBitsRead();
 

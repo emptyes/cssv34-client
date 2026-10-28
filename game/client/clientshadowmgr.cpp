@@ -1010,6 +1010,7 @@ private:
 
 	CUtlVector<VisibleShadowInfo_t> m_ShadowsInView;
 	CUtlVector<int>	m_PriorityIndex;
+	CUtlVector<int> m_PrioritySortScratch;
 };
 
 
@@ -1109,6 +1110,31 @@ void CVisibleShadowList::EnumShadow( unsigned short clientShadowHandle )
 }
 
 
+static inline bool ShadowPriorityLess( int lhs, int rhs, const VisibleShadowInfo_t *pShadows, const int *pPositions )
+{
+	float lhsArea = pShadows[lhs].m_flArea;
+	float rhsArea = pShadows[rhs].m_flArea;
+	return lhsArea < rhsArea || ( lhsArea == rhsArea && pPositions[lhs] > pPositions[rhs] );
+}
+
+static void SiftDownShadowPriority( int *pHeap, int *pHeapIndices, const int *pPositions,
+	const VisibleShadowInfo_t *pShadows, int root, int count )
+{
+	int index = pHeap[root];
+	for ( int child = root * 2 + 1; child < count; child = root * 2 + 1 )
+	{
+		if ( child + 1 < count && ShadowPriorityLess( pHeap[child], pHeap[child + 1], pShadows, pPositions ) )
+			++child;
+		if ( !ShadowPriorityLess( index, pHeap[child], pShadows, pPositions ) )
+			break;
+		pHeap[root] = pHeap[child];
+		pHeapIndices[pHeap[root]] = root;
+		root = child;
+	}
+	pHeap[root] = index;
+	pHeapIndices[index] = root;
+}
+
 //-----------------------------------------------------------------------------
 // CVisibleShadowList - Sort based on screen area/priority
 //-----------------------------------------------------------------------------
@@ -1140,6 +1166,55 @@ void CVisibleShadowList::PrioritySort()
 	}
 	if ( bAlreadySorted )
 		return;
+
+	if ( nCount >= 128 )
+	{
+		bool bFinite = true;
+		for ( i = 0; i < nCount; ++i )
+		{
+			if ( !IsFinite( m_ShadowsInView[i].m_flArea ) )
+			{
+				bFinite = false;
+				break;
+			}
+		}
+		if ( bFinite )
+		{
+			m_PrioritySortScratch.EnsureCapacity( nCount * 3 );
+			m_PrioritySortScratch.SetCount( nCount * 3 );
+			int *pHeap = m_PrioritySortScratch.Base();
+			int *pPositions = pHeap + nCount;
+			int *pHeapIndices = pPositions + nCount;
+			const VisibleShadowInfo_t *pShadows = m_ShadowsInView.Base();
+			for ( i = 0; i < nCount; ++i )
+			{
+				pHeap[i] = pPositions[i] = pHeapIndices[i] = i;
+			}
+			for ( i = nCount / 2 - 1; i >= 0; --i )
+				SiftDownShadowPriority( pHeap, pHeapIndices, pPositions, pShadows, i, nCount );
+
+			int heapCount = nCount;
+			for ( i = 0; i < nCount; ++i )
+			{
+				int selected = pHeap[0];
+				int selectedPosition = pPositions[selected];
+				int displaced = m_PriorityIndex[i];
+				if ( --heapCount > 0 )
+				{
+					pHeap[0] = pHeap[heapCount];
+					pHeapIndices[pHeap[0]] = 0;
+					SiftDownShadowPriority( pHeap, pHeapIndices, pPositions, pShadows, 0, heapCount );
+				}
+				::V_swap( m_PriorityIndex[i], m_PriorityIndex[selectedPosition] );
+				// Selection-sort ties follow current positions, not original indices.
+				pPositions[selected] = i;
+				pPositions[displaced] = selectedPosition;
+				if ( selectedPosition != i )
+					SiftDownShadowPriority( pHeap, pHeapIndices, pPositions, pShadows, pHeapIndices[displaced], heapCount );
+			}
+			return;
+		}
+	}
 
 	for ( i = 0; i < nCount - 1; ++i )
 	{

@@ -2785,6 +2785,27 @@ struct rbatch_t
 // ----------------------------------------
 */
 
+template <class T, int nInitialSize>
+class CStaticPropTempMemory : public CUtlMemory<T>
+{
+public:
+	CStaticPropTempMemory( int growSize = 0, int initSize = 0 ) : CUtlMemory<T>( growSize, initSize ) {}
+
+	void Grow( int num = 1 )
+	{
+		// Keep the usual batch reserve, but allocate it only on first use.
+		if ( this->NumAllocated() == 0 && num < nInitialSize )
+			num = nInitialSize;
+		CUtlMemory<T>::Grow( num );
+	}
+};
+
+inline uintp StaticPropModelHash( const model_t *pModel )
+{
+	uintp hash = reinterpret_cast<uintp>( pModel ) >> 4;
+	return hash ^ ( hash >> 16 );
+}
+
 inline int FindModel( const CUtlVector<rmodel_t> &list, const model_t *pModel )
 {
 	for ( int j = list.Count(); --j >= 0 ; )
@@ -2809,10 +2830,11 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 	const int MAX_OBJECTS = 1024;
 	CUtlSortVector<robject_t, CRobjectLess> objectList(0, MAX_OBJECTS);
 	CUtlVector<rmodel_t> modelList(0,256);
-	CUtlVector<short> lightObjects(0,256);
-	CUtlVector<short> shadowObjects(0,64);
-	CUtlVector<rdecalmodel_t> decalObjects(0,64);
-	CUtlVector<LightingState_t> lightStates(0,256);
+	CUtlVectorFixedGrowable<int, 128> modelLookup;
+	CUtlVector<short, CStaticPropTempMemory<short, 256> > lightObjects;
+	CUtlVector<short, CStaticPropTempMemory<short, 64> > shadowObjects;
+	CUtlVector<rdecalmodel_t, CStaticPropTempMemory<rdecalmodel_t, 64> > decalObjects;
+	CUtlVector<LightingState_t, CStaticPropTempMemory<LightingState_t, 256> > lightStates;
 	bool bForceCubemap = r_showenvcubemap.GetBool();
 	int drawnCount = 0;
 	int forcedLodSetting = r_lod.GetInt();
@@ -2825,11 +2847,42 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 	for ( int i = 0; i < count; i++ )
 	{
 		drawnCount++;
-		// UNDONE: This is a perf hit in some scenes!  Use a hash?
-		int modelIndex = FindModel( modelList, pProps[i].pModel );
+		int modelIndex;
+		int lookupIndex = -1;
+		if ( modelList.Count() < 16 )
+		{
+			modelIndex = FindModel( modelList, pProps[i].pModel );
+		}
+		else
+		{
+			if ( modelLookup.Count() < modelList.Count() * 2 )
+			{
+				int tableSize = MAX( 128, modelLookup.Count() * 2 );
+				modelLookup.SetCount( tableSize );
+				for ( int j = 0; j < tableSize; ++j )
+					modelLookup[j] = -1;
+				for ( int j = 0; j < modelList.Count(); ++j )
+				{
+					int slot = StaticPropModelHash( modelList[j].pModel ) & ( tableSize - 1 );
+					while ( modelLookup[slot] >= 0 )
+						slot = ( slot + 1 ) & ( tableSize - 1 );
+					modelLookup[slot] = j;
+				}
+			}
+			int mask = modelLookup.Count() - 1;
+			lookupIndex = StaticPropModelHash( pProps[i].pModel ) & mask;
+			while ( modelLookup[lookupIndex] >= 0 &&
+				modelList[modelLookup[lookupIndex]].pModel != pProps[i].pModel )
+			{
+				lookupIndex = ( lookupIndex + 1 ) & mask;
+			}
+			modelIndex = modelLookup[lookupIndex];
+		}
 		if ( modelIndex < 0 )
 		{
 			modelIndex = modelList.AddToTail();
+			if ( lookupIndex >= 0 )
+				modelLookup[lookupIndex] = modelIndex;
 			modelList[modelIndex].pModel = pProps[i].pModel;
 			modelList[modelIndex].pStudioHWData = g_pMDLCache->GetHardwareData( modelList[modelIndex].pModel->studio );
 		}

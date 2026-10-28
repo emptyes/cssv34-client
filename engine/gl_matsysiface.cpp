@@ -917,18 +917,7 @@ msurface2_t *CMSurfaceSortList::GetSurfaceAtHead( const surfacesortgroup_t &grou
 
 void CMSurfaceSortList::GetSurfaceListForGroup( CUtlVector<msurface2_t *> &list, const surfacesortgroup_t &group ) const
 {
-	// Append whole storage blocks; keep the original block and surface order.
-	for ( short blockIndex = group.listHead; blockIndex != -1; )
-	{
-		const materiallist_t &block = GetSurfaceBlock( blockIndex );
-		if ( block.count > 0 )
-		{
-			// Seed the normal SDK growth policy before appending the rest of the block.
-			list.AddToTail( block.pSurfaces[0] );
-			list.AddMultipleToTail( block.count - 1, block.pSurfaces + 1 );
-		}
-		blockIndex = block.nextBlock;
-	}
+	GetSurfaceListForGroup< CUtlMemory<msurface2_t *> >( list, group );
 }
 
 #ifndef SWDS

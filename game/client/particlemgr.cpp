@@ -902,14 +902,17 @@ void CParticleEffectBinding::RenderEnd( VMatrix &tempModel, VMatrix &tempView )
 
 void CParticleEffectBinding::DoBucketSort( CEffectMaterial *pMaterial, float *zCoords, int nZCoords, float minZ, float maxZ )
 {
+	if ( nZCoords <= 1 || minZ == maxZ )
+		return;
+
 	// Do an O(N) bucket sort. This helps the sort when there are lots of particles.
 	#define NUM_BUCKETS	32
-	Particle buckets[NUM_BUCKETS];
-	for( int iBucket=0; iBucket < NUM_BUCKETS; iBucket++ )
-	{
-		buckets[iBucket].m_pPrev = buckets[iBucket].m_pNext = &buckets[iBucket];
-	}
-	
+	Particle *buckets[NUM_BUCKETS] = { NULL };
+	Particle *bucketTails[NUM_BUCKETS] = { NULL };
+	Particle **bucketLinks[NUM_BUCKETS];
+	for ( int iBucket = 0; iBucket < NUM_BUCKETS; ++iBucket )
+		bucketLinks[iBucket] = &buckets[iBucket];
+
 	// Sort into buckets.
 	int iCurParticle = 0;
 	Particle *pNext, *pCur;
@@ -919,38 +922,38 @@ void CParticleEffectBinding::DoBucketSort( CEffectMaterial *pMaterial, float *zC
 		if( iCurParticle >= nZCoords )
 			break;
 
-		// Remove it..
-		UnlinkParticle( pCur );
-
 		// Add it to the appropriate bucket.
-		float flPercent;
-		if (maxZ == minZ)
-			flPercent = 0;
-		else
-			flPercent = (zCoords[iCurParticle] - minZ) / (maxZ - minZ);
+		float flPercent = (zCoords[iCurParticle] - minZ) / (maxZ - minZ);
 
 		int iAddBucket = (int)( flPercent * (NUM_BUCKETS - 0.0001f) );
 		iAddBucket = NUM_BUCKETS - iAddBucket - 1;
 		Assert( iAddBucket >= 0 && iAddBucket < NUM_BUCKETS );
 
-		InsertParticleAfter( pCur, &buckets[iAddBucket] );
+		pCur->m_pPrev = bucketTails[iAddBucket];
+		*bucketLinks[iAddBucket] = pCur;
+		bucketLinks[iAddBucket] = &pCur->m_pNext;
+		bucketTails[iAddBucket] = pCur;
 
 		++iCurParticle;
 	}
 
+	pMaterial->m_Particles.m_pNext = pCur;
+	pCur->m_pPrev = &pMaterial->m_Particles;
+
 	// Put the buckets back into the main list.
 	for( int iReAddBucket=0; iReAddBucket < NUM_BUCKETS; iReAddBucket++ )
 	{
-		Particle *pListHead = &buckets[iReAddBucket];
-		for( pCur=pListHead->m_pNext; pCur != pListHead; pCur=pNext )
+		Particle *pFirst = buckets[iReAddBucket];
+		if ( pFirst )
 		{
-			pNext = pCur->m_pNext;
-			InsertParticleAfter( pCur, &pMaterial->m_Particles );
-			--iCurParticle;
+			Particle *pLast = bucketTails[iReAddBucket];
+			Particle *pOldFirst = pMaterial->m_Particles.m_pNext;
+			pMaterial->m_Particles.m_pNext = pFirst;
+			pFirst->m_pPrev = &pMaterial->m_Particles;
+			pLast->m_pNext = pOldFirst;
+			pOldFirst->m_pPrev = pLast;
 		}
 	}
-
-	Assert(iCurParticle==0);
 }
 
 
