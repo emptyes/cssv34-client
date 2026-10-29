@@ -4002,7 +4002,9 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 	for ( int bucket = 0; bucket < RENDER_GROUP_CFG_NUM_OPAQUE_ENT_BUCKETS; ++ bucket )
 		numOpaqueEnts += m_pRenderablesList->m_RenderGroupCounts[ RENDER_GROUP_OPAQUE_ENTITY_HUGE + 2 * bucket ];
 
-	CUtlVector< C_BaseAnimating * > arrBoneSetupNpcsLast( (C_BaseAnimating **)_alloca( numOpaqueEnts * sizeof( C_BaseAnimating * ) ), numOpaqueEnts, numOpaqueEnts );
+	const bool bThreadedRenderables = r_threaded_renderables.GetBool();
+	const int numBoneSetupEnts = bThreadedRenderables ? numOpaqueEnts : 0;
+	CUtlVector< C_BaseAnimating * > arrBoneSetupNpcsLast( (C_BaseAnimating **)_alloca( numBoneSetupEnts * sizeof( C_BaseAnimating * ) ), numBoneSetupEnts, numBoneSetupEnts );
 	CUtlVector< CClientRenderablesList::CEntry > arrRenderEntsNpcsFirst( (CClientRenderablesList::CEntry *)_alloca( numOpaqueEnts * sizeof( CClientRenderablesList::CEntry ) ), numOpaqueEnts, numOpaqueEnts );
 	int numNpcs = 0, numNonNpcsAnimating = 0;
 
@@ -4020,14 +4022,15 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 				{
 					C_BaseAnimating *pba = assert_cast<C_BaseAnimating *>( pEntity );
 					arrRenderEntsNpcsFirst[ numNpcs ++ ] = *itEntity;
-					arrBoneSetupNpcsLast[ numOpaqueEnts - numNpcs ] = pba;
+					if ( bThreadedRenderables )
+						arrBoneSetupNpcsLast[ numOpaqueEnts - numNpcs ] = pba;
 					
 					itEntity->m_pRenderable = NULL;		// We will render NPCs separately
 					itEntity->m_RenderHandle = NULL;
 					
 					continue;
 				}
-				else if ( pEntity->GetBaseAnimating() )
+				else if ( bThreadedRenderables && pEntity->GetBaseAnimating() )
 				{
 					C_BaseAnimating *pba = assert_cast<C_BaseAnimating *>( pEntity );
 					arrBoneSetupNpcsLast[ numNonNpcsAnimating ++ ] = pba;
@@ -4037,7 +4040,7 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 		}
 	}
 
-	if ( r_threaded_renderables.GetBool() )
+	if ( bThreadedRenderables )
 	{
 		ParallelProcess( "BoneSetupNpcsLast", arrBoneSetupNpcsLast.Base() + numOpaqueEnts - numNpcs, numNpcs, &SetupBonesOnBaseAnimating );
 		ParallelProcess( "BoneSetupNpcsLast NonNPCs", arrBoneSetupNpcsLast.Base(), numNonNpcsAnimating, &SetupBonesOnBaseAnimating );

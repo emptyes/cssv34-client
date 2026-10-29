@@ -22,6 +22,7 @@
 #include "client.h"
 #include "cl_main.h"
 #include "utldict.h"
+#include "tier1/utlrbtree.h"
 #include "mempool.h"
 #include "enginetrace.h"			// for traceline
 #include "bspflags.h"		// for traceline
@@ -1137,10 +1138,11 @@ void S_ReloadFilesInList( IFileList *pFilesToReload )
 	audiosourcecache->ForceRecheckDiskInfo();	// Force all cached audio data to recheck size/date info next time it's accessed.
 	
 
-	CUtlVector< CSfxTable * > processed;
+	// Sound aliases must only reload a source once, without a linear scan
+	// of every source already handled by a large whitelist refresh.
+	CUtlRBTree< uintp, int > processed( 0, 0, DefLessFunc( uintp ) );
 
-	int iLast = s_Sounds.LastInorder();
-	for ( int i = s_Sounds.FirstInorder(); i != iLast; i = s_Sounds.NextInorder( i ) )
+	for ( int i = s_Sounds.FirstInorder(); i != s_Sounds.InvalidIndex(); i = s_Sounds.NextInorder( i ) )
 	{
 		FileNameHandle_t fnHandle = s_Sounds.Key( i );
 		char filename[MAX_PATH * 3];
@@ -1152,7 +1154,7 @@ void S_ReloadFilesInList( IFileList *pFilesToReload )
 	
 		// If the file isn't cached in yet, then the filesystem hasn't touched its file, so don't bother.
 		CSfxTable *sfx = s_Sounds[i].pSfx;
-		if ( sfx && ( processed.Find( sfx ) == processed.InvalidIndex() ) )
+		if ( sfx && ( processed.Find( (uintp)sfx ) == processed.InvalidIndex() ) )
 		{
 			char fullFilename[MAX_PATH*2];
 			if ( IsSoundChar( filename[0] ) )
@@ -1164,7 +1166,7 @@ void S_ReloadFilesInList( IFileList *pFilesToReload )
 			if ( !pFilesToReload->IsFileInList( fullFilename ) )
 				continue;
 
-			processed.AddToTail( sfx );
+			processed.Insert( (uintp)sfx );
 
 			S_InternalReloadSound( sfx );
 		}
@@ -5839,7 +5841,11 @@ bool S_IsSoundStillPlaying( int guid )
 //-----------------------------------------------------------------------------
 void S_SetVolumeByGuid( int guid, float fvol )
 {
+	THREAD_LOCK_SOUND();
 	channel_t *pChannel = S_FindChannelByGuid( guid );
+	if ( !pChannel )
+		return;
+
 	pChannel->master_vol = 255.0f * clamp( fvol, 0.0f, 1.0f );
 }
 

@@ -79,20 +79,32 @@ void R_AnimateLight (void)
 	// 'm' is normal light, 'a' is no light, 'z' is double bright
 	int i = (int)(cl.GetTime()*10);
 
+	const int styleCount = MIN( table->GetNumStrings(), MAX_LIGHTSTYLES );
 	for (int j=0 ; j<MAX_LIGHTSTYLES ; j++)
 	{
-		int length;
-		const char * lightstyle = (const char*) table->GetStringUserData( j, &length );
-		length--;
-		
-		if (!lightstyle || !lightstyle[0])
+		int length = 0;
+		const char * lightstyle = j < styleCount ? (const char*) table->GetStringUserData( j, &length ) : NULL;
+
+		// User data must contain at least one style character and its terminator.
+		if ( !lightstyle || length <= 1 || !lightstyle[0] || lightstyle[length-1] != '\0' )
 		{
-			d_lightstylevalue[j] = 256;
+			if ( d_lightstylevalue[j] != 256 )
+			{
+				d_lightstylevalue[j] = 256;
+				d_lightstyleframe[j] = r_framecount;
+			}
 			d_lightstylenumframes[j] = 0;
 			continue;
 		}
+		--length;
 		d_lightstylenumframes[j] = length;
-		int k = i % length;
+		int k = 0;
+		if ( length > 1 )
+		{
+			k = i % length;
+			if ( k < 0 )
+				k += length;
+		}
 		k = lightstyle[k] - 'a';
 		k = k*22;
 		if (d_lightstylevalue[j] != k)

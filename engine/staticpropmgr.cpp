@@ -1603,7 +1603,7 @@ ICollideable *CStaticPropMgr::GetStaticProp( IHandleEntity *pHandleEntity )
 	}
 
 	int nIndex = pHandleEntity ? pHandleEntity->GetRefEHandle().GetEntryIndex() : -1;
-	if ( nIndex < 0 || nIndex > m_StaticProps.Count() )
+	if ( !m_StaticProps.IsValidIndex( nIndex ) )
 	{
 		return NULL;
 	}
@@ -1613,7 +1613,7 @@ ICollideable *CStaticPropMgr::GetStaticProp( IHandleEntity *pHandleEntity )
 
 ICollideable *CStaticPropMgr::GetStaticPropByIndex( int propIndex )
 {
-	if ( propIndex < m_StaticProps.Count() )
+	if ( m_StaticProps.IsValidIndex( propIndex ) )
 	{
 		return &m_StaticProps[propIndex];
 	}
@@ -2205,6 +2205,13 @@ void CStaticPropMgr::ComputePropOpacity( const Vector &viewOrigin, float factor 
 void CStaticPropMgr::TraceRayAgainstStaticProp( const Ray_t& ray, int staticPropIndex, trace_t& tr )
 {
 #ifndef SWDS
+	if ( !m_StaticProps.IsValidIndex( staticPropIndex ) )
+	{
+		memset( &tr, 0, sizeof(trace_t) );
+		tr.fraction = 1.0f;
+		return;
+	}
+
 	// Get the prop
 	CStaticProp& prop = m_StaticProps[staticPropIndex];
 
@@ -2241,7 +2248,7 @@ void CStaticPropMgr::AddColorDecalToStaticProp( Vector const& rayStart, Vector c
 {
 #ifndef SWDS
 	// Invalid static prop? Blow it off! 
-	if (staticPropIndex >= m_StaticProps.Size())
+	if ( !m_StaticProps.IsValidIndex( staticPropIndex ) )
 	{
 		memset( &tr, 0, sizeof(trace_t) );
 		tr.fraction = 1.0f;
@@ -2327,7 +2334,7 @@ void CStaticPropMgr::GetStaticPropMaterialColorAndLighting( trace_t* pTrace,
 {
 #ifndef SWDS
 	// Invalid static prop? Blow it off! 
-	if (staticPropIndex >= m_StaticProps.Size())
+	if ( !m_StaticProps.IsValidIndex( staticPropIndex ) )
 	{
 		lighting.Init( 0, 0, 0 );
 		matColor.Init( 1, 1, 1 );

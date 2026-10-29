@@ -1909,14 +1909,17 @@ static bool IsCachedLightStylesValid( CBaseLightCache* pCache )
 	if (!pCache->HasLightStyle())
 		return true;
 
-	// FIXME: Can this start at 1, or is 0 required?
-	for (int i = 1; i < MAX_LIGHTSTYLES; ++i)
+	// Skip bytes with no cached styles, keeping the original ascending order.
+	for ( int byte = 0; byte < MAX_LIGHTSTYLE_BYTES; ++byte )
 	{
-		int byte = i >> 3;
-		int bit = i & 0x7;
-		if (pCache->m_pLightstyles[byte] & ( 1 << bit ))
+		unsigned int styles = pCache->m_pLightstyles[byte];
+		if ( byte == 0 )
+			styles &= ~1u; // Style zero was not tested by the original loop.
+
+		for ( int style = byte * 8; styles; ++style, styles >>= 1 )
 		{
-			if (d_lightstyleframe[i] > pCache->m_LastFrameUpdated_LightStyles)
+			if ( (styles & 1u) && style < MAX_LIGHTSTYLES &&
+				d_lightstyleframe[style] > pCache->m_LastFrameUpdated_LightStyles )
 				return false;
 		}
 	}

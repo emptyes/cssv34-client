@@ -5977,7 +5977,8 @@ bool C_BoneFollower::ShouldDraw( void )
 int C_BoneFollower::DrawModel( int flags )
 {
 	vcollide_t *pCollide = modelinfo->GetVCollide( m_modelIndex );
-	if ( pCollide )
+	if ( pCollide && m_solidIndex >= 0 && m_solidIndex < pCollide->solidCount &&
+		 pCollide->solids && pCollide->solids[m_solidIndex] )
 	{
 		static color32 debugColor = {0,255,255,0};
 		matrix3x4_t matrix;
@@ -5990,7 +5991,9 @@ int C_BoneFollower::DrawModel( int flags )
 bool C_BoneFollower::TestCollision( const Ray_t &ray, unsigned int mask, trace_t& trace )
 {
 	vcollide_t *pCollide = modelinfo->GetVCollide( m_modelIndex );
-	Assert( pCollide && pCollide->solidCount > m_solidIndex );
+	if ( !pCollide || m_solidIndex < 0 || m_solidIndex >= pCollide->solidCount ||
+		 !pCollide->solids || !pCollide->solids[m_solidIndex] )
+		return false;
 
 	physcollision->TraceBox( ray, pCollide->solids[m_solidIndex], GetAbsOrigin(), GetAbsAngles(), &trace );
 

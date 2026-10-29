@@ -455,12 +455,14 @@ int Voice_GetOutputData(
 	short *pCopyBuf = (short*)copyBufBytes;
 
 
-	int maxOutSamples = copyBufSize / BYTES_PER_SAMPLE;
+	const int maxOutSamples = copyBufSize / BYTES_PER_SAMPLE;
+	const int wantedSampleCount = max( 0, min( sampleCount, maxOutSamples ) );
 
 	// Find out how much we want and get it from the received data channel.	
 	CCircularBuffer *pBuffer = &pChannel->m_Buffer;
 	int nBytesToRead = pBuffer->GetReadAvailable();
-	nBytesToRead = min(min(nBytesToRead, (int)maxOutSamples), sampleCount * BYTES_PER_SAMPLE);
+	// Keep all limits in samples until converting the bounded request to bytes.
+	nBytesToRead = min( nBytesToRead / BYTES_PER_SAMPLE, wantedSampleCount ) * BYTES_PER_SAMPLE;
 	int nSamplesGotten = pBuffer->Read(pCopyBuf, nBytesToRead) / BYTES_PER_SAMPLE;
 
 	// Are we at the end of the buffer's data? If so, fade data to silence so it doesn't clip.
@@ -480,9 +482,8 @@ int Voice_GetOutputData(
 	// If there weren't enough samples in the received data channel, 
 	//   pad it with a copy of the most recent data, and if there 
 	//   isn't any, then use zeros.
-	if ( nSamplesGotten < sampleCount )
+	if ( nSamplesGotten < wantedSampleCount )
 	{
-		int wantedSampleCount = min( sampleCount, maxOutSamples );
 		int nAdditionalNeeded = (wantedSampleCount - nSamplesGotten);
 		if ( nSamplesGotten > 0 )
 		{
@@ -1281,6 +1282,10 @@ double UpsampleIntoBuffer(
 	double rate)
 {
 	double maxFraction = nSrcSamples - 1;
+	// Keep PCM writes bounded without changing the interpolation or sample order.
+	enum { SAMPLES_PER_WRITE = 128 };
+	short samples[SAMPLES_PER_WRITE];
+	int nBufferedSamples = 0;
 
 	while(1)
 	{
@@ -1293,10 +1298,18 @@ double UpsampleIntoBuffer(
 		double val1 = pSrc[iSample];
 		double val2 = pSrc[iSample+1];
 		short newSample = (short)(val1 + (val2 - val1) * frac);
-		pBuffer->Write(&newSample, sizeof(newSample));
+		samples[nBufferedSamples++] = newSample;
+		if ( nBufferedSamples == SAMPLES_PER_WRITE )
+		{
+			pBuffer->Write( samples, sizeof(samples) );
+			nBufferedSamples = 0;
+		}
 
 		startFraction += rate;
 	}
+
+	if ( nBufferedSamples )
+		pBuffer->Write( samples, nBufferedSamples * sizeof(samples[0]) );
 
 	return startFraction - floor(startFraction);
 }

@@ -2827,9 +2827,9 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 #ifndef SWDS
 	MDLCACHE_CRITICAL_SECTION_( g_pMDLCache );
 	CMatRenderContextPtr pRenderContext( materials );
-	const int MAX_OBJECTS = 1024;
-	CUtlSortVector<robject_t, CRobjectLess> objectList(0, MAX_OBJECTS);
-	CUtlVector<rmodel_t> modelList(0,256);
+	const int nInitialCount = MAX( 0, count );
+	CUtlSortVector<robject_t, CRobjectLess> objectList( 0, MIN( nInitialCount, 1024 ) );
+	CUtlVector<rmodel_t> modelList( 0, MIN( nInitialCount, 256 ) );
 	CUtlVectorFixedGrowable<int, 128> modelLookup;
 	CUtlVector<short, CStaticPropTempMemory<short, 256> > lightObjects;
 	CUtlVector<short, CStaticPropTempMemory<short, 64> > shadowObjects;

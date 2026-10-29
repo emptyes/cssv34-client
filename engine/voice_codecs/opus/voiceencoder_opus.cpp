@@ -9,6 +9,7 @@
 #include "iframeencoder.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <opus/opus.h>
 
 // NOTE: This has to be the last file included!
@@ -101,6 +102,9 @@ void VoiceEncoder_Opus::DecodeFrame(const char *pCompressed, char *pDecompressed
 	short* out = (short*)pDecompressedBytes;
 	int frame_size = opus_decode(m_Decoder, (const unsigned char*)pCompressed, 28, out, 480, 0);
 	if (frame_size < 0) frame_size = 0;
+	// The frame codec publishes a full frame, including on short/error replies.
+	if ( frame_size < RAW_FRAME_SIZE )
+		memset( out + frame_size, 0, (RAW_FRAME_SIZE - frame_size) * sizeof( *out ) );
 }
 
 bool VoiceEncoder_Opus::ResetState()

@@ -191,18 +191,19 @@ CAudioMixer *CAudioSourceVoice::CreateMixer( int initialStreamPosition )
 
 int CAudioSourceVoice::GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] )
 {
+	const int wantedSampleCount = max( 0, min( sampleCount, AUDIOSOURCE_COPYBUF_SIZE / BYTES_PER_SAMPLE ) );
 	int nSamplesGotten = Voice_GetOutputData(
 		m_iChannel,
 		copyBuf,
 		AUDIOSOURCE_COPYBUF_SIZE,
 		samplePosition,
-		sampleCount );
+		wantedSampleCount );
 	
 	// If there weren't enough bytes in the received data channel, pad it with zeros.
-	if( nSamplesGotten < sampleCount )
+	if( nSamplesGotten < wantedSampleCount )
 	{
-		memset( &copyBuf[nSamplesGotten], 0, (sampleCount - nSamplesGotten) * BYTES_PER_SAMPLE );
-		nSamplesGotten = sampleCount;
+		memset( &copyBuf[nSamplesGotten * BYTES_PER_SAMPLE], 0, (wantedSampleCount - nSamplesGotten) * BYTES_PER_SAMPLE );
+		nSamplesGotten = wantedSampleCount;
 	}
 
 	*pData = copyBuf;
