@@ -25,6 +25,7 @@ $Project "tier1test"
 		$File	"processtest.cpp"
 		$File	"tier1test.cpp"
 		$File	"utlstringtest.cpp"
+		$File	"utlpriorityqueuetest.cpp"
 	}
 
 	$Folder	"Header Files"
