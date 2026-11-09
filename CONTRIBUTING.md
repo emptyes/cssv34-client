@@ -121,7 +121,9 @@ Large pull requests that mix unrelated changes may be requested to split.
 
 ## Testing
 
-Before submitting a PR, verify that:
+Start with the [build guide](.github/docs/building-engine.md) for prerequisites and the Linux core-library compilation check. That check is not a unit-test run or a full client build; report unverified runtime checks explicitly.
+
+For changes affecting the client, verify that:
 
 - Project builds successfully.
 - Engine starts correctly.
