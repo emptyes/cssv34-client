@@ -213,7 +213,7 @@ void CEngineVoiceSteam::PlayIncomingVoiceData( XUID xuid, const byte *pbData, un
 	if ( nChannel == VOICE_CHANNEL_ERROR )
 	{
 		// Create a channel in the voice engine and a channel in the sound engine for this guy.
-		nChannel = Voice_AssignChannel( idxVoiceChan, false, 0.0f );
+		nChannel = Voice_AssignChannel( idxVoiceChan, false );
 	}
 
 	// Give the voice engine the data (it in turn gives it to the mixer for the sound engine).

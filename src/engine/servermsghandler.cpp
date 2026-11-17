@@ -64,6 +64,12 @@ extern CNetworkStringTableContainer *networkStringTableContainerServer;
 static ConVar cl_allowupload ( "cl_allowupload", "1", FCVAR_ARCHIVE, "Client uploads customization files" );
 static ConVar cl_voice_filter( "cl_voice_filter", "", 0, "Filter voice by name substring" ); // filter incoming voice data
 
+// v34 behaviour: the voice of a remote player is played at the position of the
+// speaker, so it is attenuated by distance. The flag cannot be carried in
+// SVC_VoiceData (the v34 wire format has no room for it), so the client decides
+// locally. 0 plays every voice at full volume at the listener instead.
+static ConVar cl_voice_proximity( "cl_voice_proximity", "1", FCVAR_ARCHIVE, "Attenuate remote voice by distance (v34 behaviour)" );
+
 static ConVar *replay_voice_during_playback = NULL;
 
 extern ConCommand quit;
@@ -535,7 +541,7 @@ bool CClientState::ProcessVoiceData( SVC_VoiceData *msg )
 	if ( nChannel == VOICE_CHANNEL_ERROR )
 	{
 		// Create a channel in the voice engine and a channel in the sound engine for this guy.
-		nChannel = Voice_AssignChannel( iEntity );
+		nChannel = Voice_AssignChannel( iEntity, cl_voice_proximity.GetBool() );
 		if ( nChannel == VOICE_CHANNEL_ERROR )
 		{
 			// If they used -nosound, then it's not a problem.

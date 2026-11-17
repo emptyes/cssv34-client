@@ -398,3 +398,8 @@ FodyWeavers.xsd
 !/src/lib/win32/amd64/*.dll
 !/src/lib/android/aarch64/*.a
 !/src/lib/android/arm/*.a
+
+# Local/CI build artifacts of the LTO library rebuild step
+/src/ltolibs
+/src/speex.tgz
+/win64_build

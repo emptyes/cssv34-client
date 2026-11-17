@@ -268,7 +268,8 @@ public:
 	CAutoGain						m_AutoGain;		// Gain we're applying to this channel
 
 	CVoiceChannel					*m_pNext;
-	
+
+	bool							m_bProximity;
 	int								m_nViewEntityIndex;
 	int								m_nSoundGuid;
 };
@@ -730,8 +731,17 @@ void Voice_EndChannel(int iChannel)
 		int iEnt = pChannel->m_iEntity;
 		pChannel->m_iEntity = -1;
 
-		VoiceSE_EndChannel( iChannel, pChannel->m_nViewEntityIndex );
-		
+		// v34: with proximity the sound was started on the speaking entity, so it
+		// has to be stopped on that same entity (m_iEntity is already cleared here).
+		if ( pChannel->m_bProximity == true )
+		{
+			VoiceSE_EndChannel( iChannel, iEnt );
+		}
+		else
+		{
+			VoiceSE_EndChannel( iChannel, pChannel->m_nViewEntityIndex );
+		}
+
 		g_pSoundServices->OnChangeVoiceStatus( iEnt, false );
 		VoiceSE_CloseMouth( iEnt );
 
@@ -902,7 +912,7 @@ void Voice_Idle(float frametime)
 				{
 					// Start its audio.
 					pChannel->m_nViewEntityIndex = g_pSoundServices->GetViewEntity();
-					pChannel->m_nSoundGuid = VoiceSE_StartChannel(i, pChannel->m_iEntity, false, pChannel->m_nViewEntityIndex);
+					pChannel->m_nSoundGuid = VoiceSE_StartChannel(i, pChannel->m_iEntity, pChannel->m_bProximity, pChannel->m_nViewEntityIndex);
 					g_pSoundServices->OnChangeVoiceStatus(pChannel->m_iEntity, TRUE);
 					
 					VoiceSE_InitMouth(pChannel->m_iEntity);
@@ -1208,7 +1218,7 @@ int Voice_GetCompressedData(char *pchDest, int nCount, bool bFinal)
 // Input  : nEntity - entity number to assign to a channel.
 // Output : A channel index to which the entity has been assigned.
 //------------------------------------------------------------------------------
-int Voice_AssignChannel(int nEntity)
+int Voice_AssignChannel(int nEntity, bool bProximity)
 {
 	if(g_bInTweakMode)
 		return VOICE_CHANNEL_IN_TWEAK_MODE;
@@ -1243,6 +1253,7 @@ int Voice_AssignChannel(int nEntity)
 
 	CVoiceChannel *pChannel = &g_VoiceChannels[iFree];
 	pChannel->Init(nEntity);
+	pChannel->m_bProximity = bProximity;
 	VoiceSE_StartOverdrive();
 
 	return iFree;
@@ -1449,7 +1460,7 @@ int VoiceTweak_StartVoiceTweakMode()
 
 	Voice_EndAllChannels();
 	Voice_RecordStart(NULL, NULL, NULL);
-	Voice_AssignChannel(TWEAKMODE_ENTITYINDEX );
+	Voice_AssignChannel(TWEAKMODE_ENTITYINDEX, false );
 	g_bInTweakMode = true;
 	InitMixerControls();
 
