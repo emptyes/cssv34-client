@@ -27,7 +27,7 @@
 class CCommand;
 class ConCommandBase;
 
-#define MAX_EXECUTION_MARKERS 2048
+#define MAX_EXECUTION_MARKERS 16384 // was 2048
 
 typedef enum
 {

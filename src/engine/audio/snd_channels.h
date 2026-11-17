@@ -151,13 +151,14 @@ public:
 	short	m_list[MAX_CHANNELS];
 	bool	m_quashed[MAX_CHANNELS]; // if true, the channel should be advanced, but not mixed, because it's been heuristically suppressed
 
-	CUtlVector< int >	m_nSpecialDSPs;
+	CUtlVectorFixedGrowable< int, 8 >	m_nSpecialDSPs;
 
 	bool	m_hasSpeakerChannels : 1;
 	bool	m_hasDryChannels : 1;
 	bool	m_has11kChannels : 1;
 	bool	m_has22kChannels : 1;
 	bool	m_has44kChannels : 1;
+	bool	m_hasDynamicSourceChannels : 1; // source/rate can change during mixing
 };
 
 inline int CChannelList::Count()
@@ -197,7 +198,10 @@ public:
 	void Add( channel_t *pChannel );
 	void Remove( channel_t *pChannel );
 
-	void GetActiveChannels( CChannelList &list );
+	// Skipping DSP collection leaves existing entries for the caller to rebuild.
+	void GetActiveChannels( CChannelList &list, bool bCollectDSPs = true );
+	// Caller must hold the sound mutex for lookup and use of the result.
+	channel_t *FindByGuid( int guid );
 
 	void Init();
 	int	 GetActiveCount() { return m_count; }

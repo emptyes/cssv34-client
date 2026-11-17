@@ -89,7 +89,7 @@ public:
 private:
 	enum
 	{
-		ARGS_BUFFER_LENGTH = 8192,
+		ARGS_BUFFER_LENGTH = 65536, // was 8192: servers stuffing many commands on connect overflowed it
 	};
 
 	struct Command_t

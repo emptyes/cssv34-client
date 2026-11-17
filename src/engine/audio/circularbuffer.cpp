@@ -155,7 +155,11 @@ int CCircularBuffer::Advance(int nCount)
 	// Advance the read pointer, checking for buffer 
 	//wrap.
 	//
-	m_nRead = (m_nRead + nCount) % m_nSize;
+	const int nBytesToEnd = m_nSize - m_nRead;
+	if ( nCount >= nBytesToEnd )
+		m_nRead = nCount - nBytesToEnd;
+	else
+		m_nRead += nCount;
 	m_nCount -= nCount;
 
 	//
@@ -223,19 +227,13 @@ int CCircularBuffer::Write(void *pData, int nBytesRequested)
 	
 	while(nBytesToWrite)
 	{
-		int from = m_nWrite;
-		int to = m_nWrite + nBytesToWrite;
-		
-		if(to >= m_nSize)
-		{
-			to = m_nSize;
-		}
+		const int nBytesThisPass = MIN( nBytesToWrite, m_nSize - m_nWrite );
+		memcpy( &m_chData[m_nWrite], pDataToWrite, nBytesThisPass );
+		pDataToWrite += nBytesThisPass;
 
-		memcpy(&m_chData[from], pDataToWrite, to - from);
-		pDataToWrite += to - from;
-
-		m_nWrite = to % m_nSize;
-		nBytesToWrite -= to - from;
+		const int nWriteEnd = m_nWrite + nBytesThisPass;
+		m_nWrite = ( nWriteEnd == m_nSize ) ? 0 : nWriteEnd;
+		nBytesToWrite -= nBytesThisPass;
 	}
 
 	// Did it cross the read pointer? Then slide the read pointer up.

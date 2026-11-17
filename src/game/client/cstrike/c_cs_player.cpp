@@ -323,8 +323,11 @@ void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCu
 	}
 	else
 	{
+		// endpos already contains the fraction-adjusted impact position.
 		Vector hitpos = pTrace->endpos;
 		VectorNormalize( dir );
+
+		// Keep the physics impulse separate from the normalized FX direction.
 		Vector force = dir * 4000;
 
 		// apply force where we hit it
@@ -1698,6 +1701,8 @@ void C_CSPlayer::UpdateClientSideAnimation()
 	// a third-person camera (and we don't have valid player angles).
 	if ( this == C_CSPlayer::GetLocalCSPlayer() )
 	{
+		// m_angEyeAngles comes from the server, and updates are infrequent, so use the local values instead.
+		// Using the networked pitch made the third-person model lag or snap when looking up/down.
 		QAngle LocalEyeAngles = EyeAngles();
 		m_PlayerAnimState->Update( LocalEyeAngles[YAW], LocalEyeAngles[PITCH] );
 	}

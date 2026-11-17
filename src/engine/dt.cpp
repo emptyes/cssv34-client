@@ -392,6 +392,7 @@ void SendTable_GenerateProxyPaths( CSendTablePrecalc *pPrecalc, int nProxyIndice
 	
 	// Figure out how long the path down the tree is to each node.
 	int totalPathLengths = 0;
+	// Only the total is used to size m_ProxyPathEntries; per-node lengths are not retained.
 	CalcPathLengths_R( pPrecalc->GetRootNode(), 0, totalPathLengths );
 	
 	// 

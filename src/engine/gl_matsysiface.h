@@ -105,6 +105,22 @@ public:
 	void AddSurfaceToTail( msurface2_t *pSurface, int nSortGroup, int sortID );
 	msurface2_t *GetSurfaceAtHead( const surfacesortgroup_t &group ) const;
 	void GetSurfaceListForGroup( CUtlVector<msurface2_t *> &list, const surfacesortgroup_t &group ) const;
+	template <class A>
+	void GetSurfaceListForGroup( CUtlVector<msurface2_t *, A> &list, const surfacesortgroup_t &group ) const
+	{
+		// Append whole storage blocks; keep the original block and surface order.
+		for ( short blockIndex = group.listHead; blockIndex != -1; )
+		{
+			const materiallist_t &block = GetSurfaceBlock( blockIndex );
+			if ( block.count > 0 )
+			{
+				// Seed the normal SDK growth policy before appending the rest of the block.
+				list.AddToTail( block.pSurfaces[0] );
+				list.AddMultipleToTail( block.count - 1, block.pSurfaces + 1 );
+			}
+			blockIndex = block.nextBlock;
+		}
+	}
 	inline int GetIndexForSortID( int nSortGroup, int sortID ) const
 	{
 		Assert(sortID<m_maxSortIDs);

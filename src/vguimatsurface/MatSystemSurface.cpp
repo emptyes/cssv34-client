@@ -2870,6 +2870,11 @@ void CMatSystemSurface::SetCursor(HCursor hCursor)
 	if ( IsCursorLocked() )
 		return;
 
+	// cssv34-client: while some popup wants the mouse (demo UI on shift+F2, chat, ...)
+	// the cursor is free, so never select an invisible cursor. Game view / overlay
+	// panels use dc_none or null (= dc_user, also invisible), which hid the cursor
+	// as soon as it left the popup. Mouse capture (key binding, model rotation)
+	// may still hide it; CalculateMouseVisible() hides it when nothing needs the mouse.
 	if ( m_bNeedsMouse && !input()->GetMouseCapture() &&
 		 ( hCursor == vgui::dc_none || hCursor == vgui::dc_user || hCursor == vgui::dc_blank ) )
 	{
@@ -4176,6 +4181,9 @@ void CMatSystemSurface::CalculateMouseVisible()
 		LockCursor();
 	}
 
+	// cssv34-client: keep the hardware cursor shown for as long as a popup needs the
+	// mouse, whatever cursor the panel under it requests (same mechanism Valve uses
+	// for the TF2 chat, see dc_alwaysvisible_push in Cursor.cpp).
 	if ( m_bNeedsMouse )
 	{
 		UpdateForceCursorVisible( true );

@@ -62,6 +62,8 @@ typedef void *HDC;
 #include "cl_steamauth.h"
 #endif
 
+// Screenshots are encoded with stb_image_write: the prebuilt libjpeg.lib (v9) does not
+// match public/jpeglib headers (v8), and its error handler called exit() -> game froze on F5.
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO

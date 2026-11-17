@@ -6,6 +6,7 @@
 
 #include "tier2/soundutils.h"
 #include "tier2/riff.h"
+#include "tier2/waveformat.h"
 #include "tier2/tier2.h"
 #include "filesystem.h"
 
@@ -144,94 +145,33 @@ unsigned int CFSIOWriteBinary::tell( intp file )
 float GetWavSoundDuration( const char *pWavFile )
 {
 	InFileRIFF riff( pWavFile, *g_pFSIOReadBinary );
-
-	// UNDONE: Don't use printf to handle errors
 	if ( riff.RIFFName() != RIFF_WAVE )
 		return 0.0f;
 
-	int nDataSize = 0;
-
-	// set up the iterator for the whole file (root RIFF is a chunk)
+	char formatBuffer[1024];
+	WaveFormatInfo_t info;
+	bool found = false;
+	int dataSize = 0;
 	IterateRIFF walk( riff, riff.RIFFSize() );
-
-	// This chunk must be first as it contains the wave's format
-	// break out when we've parsed it
-	char pFormatBuffer[ 1024 ];
-	int nFormatSize;
-	bool bFound = false;
-	for ( ; walk.ChunkAvailable( ); walk.ChunkNext() )
+	for ( ; walk.ChunkAvailable(); walk.ChunkNext() )
 	{
-		switch ( walk.ChunkName() )
+		if ( walk.ChunkName() == WAVE_FMT )
 		{
-		case WAVE_FMT:
-			bFound = true;
-			if ( walk.ChunkSize() > sizeof(pFormatBuffer) )
-			{
-				Warning( "oops, format tag too big!!!" );
+			unsigned int size = walk.ChunkSize();
+			if ( size < 16 || size > sizeof( formatBuffer ) || walk.ChunkRead( formatBuffer ) != static_cast<int>( size ) ||
+				 !WaveFormatParse( formatBuffer, static_cast<int>( size ), info ) )
 				return 0.0f;
-			}
-
-			nFormatSize = walk.ChunkSize();
-			walk.ChunkRead( pFormatBuffer );
-			break;
-
-		case WAVE_DATA:
-			nDataSize += walk.ChunkSize();
-			break;
+			found = true;
 		}
-	}
-
-	if ( !bFound )
-		return 0.0f;
-
-	const WAVEFORMATEX *pHeader = (const WAVEFORMATEX *)pFormatBuffer;
-
-	int format = pHeader->wFormatTag;
-
-	int nBits = pHeader->wBitsPerSample;
-	int nRate = pHeader->nSamplesPerSec;
-	int nChannels = pHeader->nChannels;
-	int nSampleSize = ( nBits * nChannels ) / 8;
-
-	// this can never be zero -- other functions divide by this. 
-	// This should never happen, but avoid crashing
-	if ( nSampleSize <= 0 )
-	{
-		nSampleSize = 1;
-	}
-
-	int nSampleCount = 0;
-	float flTrueSampleSize = nSampleSize;
-
-	if ( format == WAVE_FORMAT_ADPCM )
-	{
-		nSampleSize = 1;
-
-		ADPCMWAVEFORMAT *pFormat = (ADPCMWAVEFORMAT *)pFormatBuffer;
-		int blockSize = ((pFormat->wSamplesPerBlock - 2) * pFormat->wfx.nChannels ) / 2;
-		blockSize += 7 * pFormat->wfx.nChannels;
-
-		int blockCount = nSampleCount / blockSize;
-		int blockRem = nSampleCount % blockSize;
-
-		// total samples in complete blocks
-		nSampleCount = blockCount * pFormat->wSamplesPerBlock;
-
-		// add remaining in a short block
-		if ( blockRem )
+		else if ( walk.ChunkName() == WAVE_DATA )
 		{
-			nSampleCount += pFormat->wSamplesPerBlock - (((blockSize - blockRem) * 2) / nChannels);
+			if ( walk.ChunkSize() > static_cast<unsigned int>( INT_MAX - dataSize ) )
+				return 0.0f;
+			dataSize += walk.ChunkSize();
 		}
-
-		flTrueSampleSize = 0.5f;
-
 	}
-	else
-	{
-		nSampleCount = nDataSize / nSampleSize;
-	}
-
-	float flDuration = (float)nSampleCount / (float)nRate;
-	return flDuration;
+	if ( !found )
+		return 0.0f;
+	return static_cast<float>( WaveFormatSampleCount( info, dataSize ) ) / info.rate;
 }
 #endif

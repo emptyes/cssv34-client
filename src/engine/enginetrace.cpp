@@ -588,6 +588,8 @@ void CEngineTrace::GetBrushesInAABB( const Vector &vMins, const Vector &vMaxs, C
 
 	int *pLeafList = (int *)stackalloc( pBSPData->numleafs * 2 * sizeof( int ) ); // *2 just in case
 	int iNumLeafs = CM_BoxLeafnums( vMins, vMaxs, pLeafList, pBSPData->numleafs * 2, NULL );
+
+	// Each brush only needs a per-call visited flag, not an integer counter.
 	CUtlVector<unsigned char> counters;
 	counters.SetSize( pBSPData->numbrushes );
 	memset( counters.Base(), 0, pBSPData->numbrushes * sizeof(unsigned char) );

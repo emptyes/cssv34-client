@@ -1316,8 +1316,13 @@ void CClientState::ReadDeletions( CEntityReadInfo &u )
 	VPROF( "ReadDeletions" );
 	while ( u.m_pBuf->ReadOneBit()!=0 )
 	{
-		int idx = u.m_pBuf->ReadUBitLong( MAX_EDICT_BITS );	
-		
+		int idx = u.m_pBuf->ReadUBitLong( MAX_EDICT_BITS );
+		if ( u.m_pBuf->IsOverflowed() )
+		{
+			Host_Error( "ReadDeletions: incomplete entity index\n" );
+			return;
+		}
+
 		Assert( !u.m_pTo->transmit_entity.Get( idx ) );
 
 		CL_DeleteDLLEntity( idx, "ReadDeletions" );
@@ -1333,6 +1338,11 @@ void CClientState::ReadEnterPVS( CEntityReadInfo &u )
 	int iClass = u.m_pBuf->ReadUBitLong( m_nServerClassBits );
 
 	int iSerialNum = u.m_pBuf->ReadUBitLong( NUM_NETWORKED_EHANDLE_SERIAL_NUMBER_BITS );
+	if ( u.m_pBuf->IsOverflowed() )
+	{
+		Host_Error( "ReadEnterPVS: incomplete entity class or serial number\n" );
+		return;
+	}
 
 	CL_CopyNewEntity( u, iClass, iSerialNum );
 

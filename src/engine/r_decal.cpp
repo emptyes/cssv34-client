@@ -58,6 +58,7 @@ struct decalinfo_t
 	Vector		m_Basis[3];
 	void		*m_pUserData;
 	const Vector *m_pNormal;
+	// Keep small per-shot surface lists local; larger decals still grow on the heap.
 	CUtlVectorFixedGrowable<SurfaceHandle_t,8>	m_aApplySurfs;
 };
 

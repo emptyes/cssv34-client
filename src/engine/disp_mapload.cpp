@@ -9,6 +9,7 @@
 
 #include "render_pch.h"
 #include "modelloader.h"
+#include "host.h"
 #include "gl_model_private.h"
 #include "gl_lightmap.h"
 #include "disp.h"
@@ -621,6 +622,16 @@ bool DispInfo_LoadDisplacements( model_t *pWorld, bool bRestoring )
 		);
 	CMapLoadHelper lhDispInfo( LUMP_DISPINFO );
 	lhDispInfo.LoadLumpData( 0, nDisplacements * sizeof( ddispinfo_t ), tempDisps );
+
+	// Validate before linking faces or building buffers that use power-dependent sizes.
+	for ( int iDisp = 0; iDisp < nDisplacements; ++iDisp )
+	{
+		if ( tempDisps[iDisp].power < MIN_MAP_DISP_POWER || tempDisps[iDisp].power > MAX_MAP_DISP_POWER )
+		{
+			Host_Error( "DispInfo_LoadDisplacements: invalid displacement power (%d)\n", tempDisps[iDisp].power );
+			return false;
+		}
+	}
 
 	// Now hook up the displacements to their parents.
 	DispInfo_LinkToParentFaces( pWorld, tempDisps, nDisplacements );

@@ -1051,6 +1051,7 @@ void C_SceneEntity::ClientThink()
 void C_SceneEntity::CheckQueuedEvents()
 {
 // Check for duplicates
+	// Small snapshots stay local; large queues retain the normal allocation path.
 	QueuedEvents_t localEvents[16];
 	CUtlVector< QueuedEvents_t > localList( localEvents, ARRAYSIZE( localEvents ) );
 	CUtlVector< QueuedEvents_t > dynamicList;

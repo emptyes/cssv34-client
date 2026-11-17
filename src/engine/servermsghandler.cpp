@@ -567,9 +567,9 @@ void CClientState::ProcessSoundsWithProtoVersion( SVC_Sounds *msg, CUtlVector< S
 	SoundInfo_t defaultSound; defaultSound.SetDefault();
 	SoundInfo_t *pDeltaSound = &defaultSound;
 
-	// Max is 32 in multiplayer and 255 in singleplayer
-	// Reserve this memory up front so it doesn't realloc under pDeltaSound pointing at it
-	sounds.EnsureCapacity( 256 );
+	// Reserve the complete batch before reading deltas: pDeltaSound points into
+	// this vector after the first sound and must remain valid until the loop ends.
+	sounds.EnsureCapacity( sounds.Count() + msg->m_nNumSounds );
 	
 	for ( int i = 0; i < msg->m_nNumSounds; i++ )
 	{
@@ -598,7 +598,14 @@ bool CClientState::ProcessSounds( SVC_Sounds *msg )
 		return false;
 	}
 
+	enum { LOCAL_SOUND_COUNT = 8 };
+	alignas(SoundInfo_t) byte soundStorage[LOCAL_SOUND_COUNT * sizeof(SoundInfo_t)];
 	CUtlVector< SoundInfo_t > sounds;
+	if ( msg->m_nNumSounds <= LOCAL_SOUND_COUNT )
+	{
+		CUtlVector< SoundInfo_t > localSounds( reinterpret_cast<SoundInfo_t *>( soundStorage ), LOCAL_SOUND_COUNT );
+		sounds.Swap( localSounds );
+	}
 
 	int startbit = msg->m_DataIn.GetNumBitsRead();
 
@@ -899,8 +906,13 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		{
 			from = NULL; // full update
 
-			classID = buffer.ReadUBitLong( m_nServerClassBits ); // classID 
-		
+			classID = buffer.ReadUBitLong( m_nServerClassBits ); // classID
+			if ( buffer.IsOverflowed() || !m_pServerClasses || classID <= 0 || classID > m_nServerClasses )
+			{
+				DevMsg( "CL_QueueEvent: invalid server class index.\n" );
+				return false;
+			}
+
 			// Look up the client class, etc.
 	
 			// Match the server classes to the client classes.
@@ -925,7 +937,11 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		}
 		else
 		{
-			Assert( ei );
+			if ( !ei || buffer.IsOverflowed() )
+			{
+				DevMsg( "CL_QueueEvent: missing or incomplete previous event.\n" );
+				return false;
+			}
 
 			unsigned int buffer_size = PAD_NUMBER( Bits2Bytes( ei->bits ), 4 );
 			bf_read fromBuf( ei->pData, buffer_size );

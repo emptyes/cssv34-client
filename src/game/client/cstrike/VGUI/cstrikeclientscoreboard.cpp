@@ -41,6 +41,61 @@ const float kTeamScoreMargin = 0.15f;			// margin as a ratio of avatar height
 const float kTeamScoreLineLeadingRatio = 0.25f;	// padding as a ratio of avatar height
 
 // CT player data colors
+ConVar cl_scoreboard_show_clientmod( "cl_scoreboard_show_clientmod", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Show CM in the CLIENT (ex-CLAN) scoreboard column for ClientMod players" );
+
+static bool HasClientModMarker( const player_info_t &pi )
+{
+	return !pi.fakeplayer && !pi.ishltv && (unsigned char)pi.friendsName[0] == 0x08;
+}
+
+static bool HasPossibleClientModMarker( const player_info_t &pi )
+{
+	if ( pi.fakeplayer || pi.ishltv || pi.friendsName[0] != 'c' || pi.friendsName[1] != 'm' )
+		return false;
+	for ( int i = 2; i < 8; ++i )
+	{
+		const unsigned char c = (unsigned char)pi.friendsName[i];
+		if ( !( ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) ||
+			( c >= '0' && c <= '9' ) || c == '+' || c == '/' || c == '-' || c == '_' ) )
+			return false;
+	}
+	return true;
+}
+
+CON_COMMAND( cl_clientmod_list, "List ClientMod markers; use cl_clientmod_list 1 for diagnostics. Unknown does not mean Original." )
+{
+	const bool diagnostics = args.ArgC() == 2 && Q_strcmp( args[1], "1" ) == 0;
+	if ( args.ArgC() > 1 && !diagnostics )
+	{
+		Msg( "Usage: cl_clientmod_list [1]\n" );
+		return;
+	}
+
+	int cm = 0, possible = 0, total = 0;
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		player_info_t pi;
+		if ( !engine->GetPlayerInfo( i, &pi ) || pi.fakeplayer || pi.ishltv )
+			continue;
+		const bool bCM = HasClientModMarker( pi );
+		const bool bPossible = !bCM && HasPossibleClientModMarker( pi );
+		total++;
+		if ( bCM )
+			cm++;
+		if ( bPossible )
+			possible++;
+		Msg( "%2d  %-10s %.*s\n", i, bCM ? "ClientMod" : ( bPossible ? "ClientMod?" : "Unknown" ), (int)sizeof(pi.name), pi.name );
+		if ( diagnostics )
+		{
+			Msg( "    userid=%d friendsID=%u friendsName=", pi.userID, (unsigned int)pi.friendsID );
+			for ( int j = 0; j < (int)sizeof(pi.friendsName); j++ )
+				Msg( "%02X%s", (unsigned int)(unsigned char)pi.friendsName[j], j == (int)sizeof(pi.friendsName) - 1 ? "\n" : " " );
+		}
+	}
+	Msg( "ClientMod markers: %d; Possible: %d; Unknown: %d; Total: %d\n", cm, possible, total - cm - possible, total );
+	Msg( "ClientMod? is an unverified text marker. No marker does not identify the client. Markers are not authentication.\n" );
+}
+
 ConVar cl_scoreboard_ct_color_red( "cl_scoreboard_ct_color_red", "150", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data red channel", true, 0.0f, true, 255.0f );
 ConVar cl_scoreboard_ct_color_green( "cl_scoreboard_ct_color_green", "200", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data green channel", true, 0.0f, true, 255.0f );
 ConVar cl_scoreboard_ct_color_blue( "cl_scoreboard_ct_color_blue", "255", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Scoreboard CT player data blue channel", true, 0.0f, true, 255.0f );
@@ -225,6 +280,28 @@ void CCSClientScoreBoardDialog::ApplySchemeSettings( vgui::IScheme *pScheme )
 	//
 
     LoadControlSettings( "Resource/UI/scoreboard.res" );
+
+	// Rename the "CLAN" column header: the column shows the client type (CM) instead.
+	if ( cl_scoreboard_show_clientmod.GetBool() )
+	{
+		static const wchar_t *s_ClanHeaders[] = { L"CLAN", L"Clan", L"clan", L"\x041A\x041B\x0410\x041D", L"\x041A\x043B\x0430\x043D" };
+		for ( int i = 0; i < GetChildCount(); i++ )
+		{
+			Label *pLabel = dynamic_cast< Label * >( GetChild( i ) );
+			if ( !pLabel )
+				continue;
+			wchar_t wszText[64];
+			pLabel->GetText( wszText, sizeof( wszText ) );
+			for ( int j = 0; j < ARRAYSIZE( s_ClanHeaders ); j++ )
+			{
+				if ( !V_wcscmp( wszText, s_ClanHeaders[j] ) )
+				{
+					pLabel->SetText( "CLIENT" );
+					break;
+				}
+			}
+		}
+	}
 
     //Just used for a background alpha value.  50% opacity
     m_listItemFont = pScheme->GetFont( "ScoreboardBody_1", IsProportional() );
@@ -855,8 +932,18 @@ void CCSClientScoreBoardDialog::UpdateTeamPlayerDisplay( TeamDisplayInfo& teamDi
 				if ( playerDisplay.pClanLabel != NULL )
 				{
 					const char* pUTF8Clan = pPlayerScore->szClanTag;
+					if ( cl_scoreboard_show_clientmod.GetBool() )
+					{
+						player_info_t pi;
+						pUTF8Clan = "";
+						if ( engine->GetPlayerInfo( playerIndex, &pi ) )
+							pUTF8Clan = HasClientModMarker( pi ) ? "CM" : ( HasPossibleClientModMarker( pi ) ? "CM?" : "" );
+					}
 					AdjustFontToFit( pUTF8Clan, playerDisplay.pClanLabel );
 
+					// "CM" belongs to the CLIENT column: center it under the header instead of
+					// right-aligning it against the nickname (looked like a name prefix).
+					playerDisplay.pClanLabel->SetContentAlignment( cl_scoreboard_show_clientmod.GetBool() ? Label::a_center : Label::a_east );
 					playerDisplay.pClanLabel->SetVisible( true );
 					playerDisplay.pClanLabel->SetText( pUTF8Clan );
 					playerDisplay.pClanLabel->SetBgColor( m_PlayerDataBgColor );

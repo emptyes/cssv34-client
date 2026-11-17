@@ -111,6 +111,9 @@ void C_BaseViewModel::UncorrectViewModelAttachment( Vector &vOrigin )
 
 
 #ifdef CSTRIKE_DLL
+//-----------------------------------------------------------------------------
+// Is this sound one of the active weapon's shot sounds (played by FX_FireBullets)?
+//-----------------------------------------------------------------------------
 bool C_BaseViewModel::IsWeaponShootSound( const char *pSound )
 {
 	if ( !pSound || !pSound[0] )
@@ -141,6 +144,8 @@ void C_BaseViewModel::FireEvent( const Vector& origin, const QAngle& angles, int
 	if ( ( event == AE_CL_PLAYSOUND ) || ( event == CL_EVENT_SOUND ) )
 	{
 #ifdef CSTRIKE_DLL
+		// Some old CS:S viewmodels (P90) also have the shot sound as an animation event. The shot sound
+		// is already played by FX_FireBullets, so playing it here too made the shot sound doubled.
 		if ( IsWeaponShootSound( options ) )
 			return;
 #endif

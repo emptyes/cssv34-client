@@ -214,6 +214,17 @@ void FX_FireBullets(
 
 	WeaponSound_t sound_type = SINGLE;
 
+	// M4A1/USP fire with Primary_Mode even when silenced (m_weaponMode toggling is disabled
+	// in this codebase), so the silenced state must be read from the weapon itself.
+	// Without this the locally predicted shot plays the unsilenced sound.
+	bool bSilenced = ( iMode == Secondary_Mode );
+	if ( !bSilenced && pPlayer && ( iWeaponID == WEAPON_M4A1 || iWeaponID == WEAPON_USP ) )
+	{
+		CWeaponCSBase *pActiveWeapon = pPlayer->GetActiveCSWeapon();
+		if ( pActiveWeapon && pActiveWeapon->GetWeaponID() == iWeaponID && pActiveWeapon->IsSilenced() )
+			bSilenced = true;
+	}
+
 	// CS HACK, tweak some weapon values based on primary/secondary mode
 
 	if ( iWeaponID == WEAPON_GLOCK )
@@ -226,7 +237,7 @@ void FX_FireBullets(
 	}
 	else if ( iWeaponID == WEAPON_M4A1 )
 	{
-		if ( iMode == Secondary_Mode )
+		if ( bSilenced )
 		{
 			flRangeModifier = 0.95f; // slower bullets in silenced mode
 			sound_type = SPECIAL1;
@@ -234,7 +245,7 @@ void FX_FireBullets(
 	}
 	else if ( iWeaponID == WEAPON_USP )
 	{
-		if ( iMode == Secondary_Mode )
+		if ( bSilenced )
 		{
 			iDamage = 30; // reduced damage in silenced mode
 			sound_type = SPECIAL1;

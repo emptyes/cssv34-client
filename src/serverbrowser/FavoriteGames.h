@@ -32,6 +32,10 @@ public:
 	// called when the current refresh list is complete
 	virtual void RefreshComplete( NServerResponse response );
 
+	// saved list from ServerBrowser.vdf
+	virtual KeyValues *GetAddressList();
+	virtual void OnAddressListServerResponded( newgameserver_t &server );
+
 	// passed from main server browser window instead of messages
 	void OnConnectToGame();
 	void OnDisconnectFromGame( void );

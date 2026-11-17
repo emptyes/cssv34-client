@@ -147,6 +147,8 @@ bool Impact( Vector &vecOrigin, Vector &vecStart, int iMaterial, int iDamageType
 		{
 			if ( (pEntity->entindex() == 0) && (iHitbox != 0) )
 			{
+				if ( iHitbox < 0 )
+					return false;
 				staticpropmgr->AddDecalToStaticProp( vecStart, traceExt, iHitbox - 1, decalNumber, true, tr );
 			}
 			else if ( pEntity )
@@ -164,8 +166,12 @@ bool Impact( Vector &vecOrigin, Vector &vecStart, int iMaterial, int iDamageType
 
 		if ( (pEntity->entindex() == 0) && (iHitbox != 0) )
 		{
+			if ( iHitbox < 0 )
+				return false;
 			// Special case for world entity with hitbox (that's a static prop)
 			ICollideable *pCollideable = staticpropmgr->GetStaticPropByIndex( iHitbox - 1 ); 
+			if ( !pCollideable )
+				return false;
 			enginetrace->ClipRayToCollideable( ray, MASK_SHOT, pCollideable, &tr );
 		}
 		else

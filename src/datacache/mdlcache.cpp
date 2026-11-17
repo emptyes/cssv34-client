@@ -10,6 +10,7 @@
 //===========================================================================//
 
 #include <memory.h>
+#include <limits.h>
 #include "tier0/vprof.h"
 #include "tier0/icommandline.h"
 #include "tier1/utllinkedlist.h"
@@ -503,7 +504,7 @@ private:
 	FSAsyncStatus_t LoadData( const char *pszFilename, const char *pszPathID, bool bAsync, FSAsyncControl_t *pControl ) { return LoadData( pszFilename, pszPathID, NULL, 0, 0, bAsync, pControl ); }
 	FSAsyncStatus_t LoadData( const char *pszFilename, const char *pszPathID, void *pDest, int nBytes, int nOffset, bool bAsync, FSAsyncControl_t *pControl );
 	vertexFileHeader_t *LoadVertexData( studiohdr_t *pStudioHdr );
-	vertexFileHeader_t *BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr  );
+	vertexFileHeader_t *BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr, int nDataSize );
 	bool BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData, studiohdr_t *pStudioHdr, OptimizedModel::FileHeader_t *pVtxHdr );
 	void ConvertFlexData( studiohdr_t *pStudioHdr );
 
@@ -2922,9 +2923,9 @@ bool CMDLCache::ProcessDataIntoCache( MDLHandle_t handle, MDLCacheDataType_t typ
 		{
 			if ( bDataValid )
 			{
-				BuildAndCacheVertexData( pStudioHdrCurrent, (vertexFileHeader_t *)pData );
+				bDataValid = BuildAndCacheVertexData( pStudioHdrCurrent, (vertexFileHeader_t *)pData, nDataSize ) != NULL;
 			}
-			else
+			if ( !bDataValid )
 			{
 				pStudioDataCurrent->m_nFlags |= STUDIODATA_FLAGS_NO_VERTEX_DATA;
 				if ( pStudioHdrCurrent->numbodyparts )
@@ -3307,8 +3308,87 @@ bool CMDLCache::SetAsyncLoad( MDLCacheDataType_t type, bool bAsync )
 //-----------------------------------------------------------------------------
 // Cache model's specified dynamic data
 //-----------------------------------------------------------------------------
-vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr  )
+static bool ValidateVertexData( const vertexFileHeader_t *pHdr, int nDataSize, int rootLOD, bool bNeedsTangentS )
 {
+	if ( !pHdr || nDataSize < (int)sizeof( vertexFileHeader_t ) ||
+		pHdr->numLODs < 1 || pHdr->numLODs > MAX_NUM_LODS || rootLOD < 0 || rootLOD >= pHdr->numLODs )
+	{
+		return false;
+	}
+
+	for ( int lod = 0; lod < pHdr->numLODs; ++lod )
+	{
+		if ( pHdr->numLODVertexes[lod] < 0 ||
+			( lod > 0 && pHdr->numLODVertexes[lod] > pHdr->numLODVertexes[lod - 1] ) )
+		{
+			return false;
+		}
+	}
+
+	if ( pHdr->vertexDataStart < (int)sizeof( vertexFileHeader_t ) ||
+		pHdr->vertexDataStart > nDataSize || ( pHdr->vertexDataStart & 3 ) ||
+		pHdr->numLODVertexes[0] > ( nDataSize - pHdr->vertexDataStart ) / (int)sizeof( mstudiovertex_t ) )
+	{
+		return false;
+	}
+
+	if ( bNeedsTangentS &&
+		( pHdr->tangentDataStart < (int)sizeof( vertexFileHeader_t ) ||
+		  pHdr->tangentDataStart > nDataSize || ( pHdr->tangentDataStart & 3 ) ||
+		  pHdr->numLODVertexes[0] > ( nDataSize - pHdr->tangentDataStart ) / (int)sizeof( Vector4D ) ) )
+	{
+		return false;
+	}
+
+	uint64 vertexCount = (uint64)pHdr->numLODVertexes[rootLOD] + 1;
+	uint64 cacheLength = (uint64)pHdr->vertexDataStart +
+		vertexCount * ( sizeof( mstudiovertex_t ) + ( bNeedsTangentS ? sizeof( Vector4D ) : 0 ) );
+	if ( cacheLength > INT_MAX || pHdr->numFixups < 0 )
+	{
+		return false;
+	}
+	if ( !pHdr->numFixups )
+	{
+		return true;
+	}
+
+	if ( pHdr->fixupTableStart < (int)sizeof( vertexFileHeader_t ) ||
+		pHdr->fixupTableStart > nDataSize || ( pHdr->fixupTableStart & 3 ) ||
+		pHdr->numFixups > ( nDataSize - pHdr->fixupTableStart ) / (int)sizeof( vertexFileFixup_t ) )
+	{
+		return false;
+	}
+
+	const vertexFileFixup_t *pFixups = (const vertexFileFixup_t *)( (const byte *)pHdr + pHdr->fixupTableStart );
+	int target = 0;
+	for ( int i = 0; i < pHdr->numFixups; ++i )
+	{
+		const vertexFileFixup_t &fixup = pFixups[i];
+		if ( fixup.lod < 0 || fixup.lod >= MAX_NUM_LODS ||
+			fixup.sourceVertexID < 0 || fixup.sourceVertexID > pHdr->numLODVertexes[0] ||
+			fixup.numVertexes < 0 || fixup.numVertexes > pHdr->numLODVertexes[0] - fixup.sourceVertexID )
+		{
+			return false;
+		}
+		if ( fixup.lod >= rootLOD )
+		{
+			if ( fixup.numVertexes > pHdr->numLODVertexes[rootLOD] - target )
+			{
+				return false;
+			}
+			target += fixup.numVertexes;
+		}
+	}
+	return target == pHdr->numLODVertexes[rootLOD];
+}
+
+vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr, int nDataSize )
+{
+	if ( !pStudioHdr || !pRawVvdHdr || nDataSize < (int)sizeof( vertexFileHeader_t ) )
+	{
+		return NULL;
+	}
+
 	MDLHandle_t	handle = VoidPtrToMDLHandle( pStudioHdr->VirtualModel() );
 	vertexFileHeader_t *pVvdHdr;
 
@@ -3333,8 +3413,7 @@ vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr,
 		return NULL;
 	}
 
-	Assert( pRawVvdHdr->numLODs );
-	if ( !pRawVvdHdr->numLODs )
+	if ( pRawVvdHdr->numLODs < 1 || pRawVvdHdr->numLODs > MAX_NUM_LODS )
 	{
 		return NULL;
 	}
@@ -3362,6 +3441,11 @@ vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr,
 
 	bool bNeedsTangentS = IsX360() || (g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 80);
 	int rootLOD = min( (int)pStudioHdr->rootLOD, pRawVvdHdr->numLODs - 1 );
+	if ( IsPC() && !ValidateVertexData( pRawVvdHdr, nDataSize, rootLOD, bNeedsTangentS ) )
+	{
+		Warning( "Error Vertex File for '%s': invalid data ranges or fixups\n", pStudioHdr->pszName() );
+		return NULL;
+	}
 
 	// determine final cache footprint, possibly truncated due to lod
 	int cacheLength = Studio_VertexDataSize( pRawVvdHdr, rootLOD, bNeedsTangentS );
@@ -3372,6 +3456,10 @@ vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr,
 	MemAlloc_PushAllocDbgInfo( "Models:Vertex data", 0);
 	pVvdHdr = (vertexFileHeader_t *)AllocData( MDLCACHE_VERTEXES, cacheLength );
 	MemAlloc_PopAllocDbgInfo();
+	if ( !pVvdHdr )
+	{
+		return NULL;
+	}
 
 	GetCacheSection( MDLCACHE_VERTEXES )->BeginFrameLocking();
 

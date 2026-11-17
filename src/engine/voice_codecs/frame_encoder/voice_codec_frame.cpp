@@ -49,6 +49,7 @@ public:
 		{
 			m_nRawSamples = m_nRawBytes >> 1;
 			Assert(m_nRawBytes <= MAX_FRAMEBUFFER_SAMPLES && m_nEncodedBytes <= MAX_FRAMEBUFFER_SAMPLES);
+			m_nEncodeBufferSamples = 0;
 			return true;
 		}
 		else
@@ -77,15 +78,14 @@ public:
 		while((nSamples + m_nEncodeBufferSamples) >= m_nRawSamples && (maxCompressedBytes - nCompressedBytes) >= m_nEncodedBytes)
 		{
 			// Get the data block out.
-			short samples[MAX_FRAMEBUFFER_SAMPLES];
-			memcpy(samples, m_EncodeBuffer, m_nEncodeBufferSamples*BYTES_PER_SAMPLE);
-			memcpy(&samples[m_nEncodeBufferSamples], pUncompressed, (m_nRawSamples - m_nEncodeBufferSamples) * BYTES_PER_SAMPLE);
+			// The queued prefix is already in m_EncodeBuffer; append only new PCM.
+			memcpy(&m_EncodeBuffer[m_nEncodeBufferSamples], pUncompressed, (m_nRawSamples - m_nEncodeBufferSamples) * BYTES_PER_SAMPLE);
 			nSamples -= m_nRawSamples - m_nEncodeBufferSamples;
 			pUncompressed += m_nRawSamples - m_nEncodeBufferSamples;
 			m_nEncodeBufferSamples = 0;
 			
 			// Compress it.
-			m_pFrameEncoder->EncodeFrame((const char*)samples, &pCompressed[nCompressedBytes]);
+			m_pFrameEncoder->EncodeFrame((const char*)m_EncodeBuffer, &pCompressed[nCompressedBytes]);
 			nCompressedBytes += m_nEncodedBytes;
 		}
 
@@ -129,10 +129,13 @@ public:
 
 	virtual bool	ResetState()
 	{
-		if(m_pFrameEncoder)
-			return m_pFrameEncoder->ResetState();
-		else
-			return false;
+		if(m_pFrameEncoder && m_pFrameEncoder->ResetState())
+		{
+			// A new stream must not reuse PCM queued before the reset.
+			m_nEncodeBufferSamples = 0;
+			return true;
+		}
+		return false;
 	}
 
 

@@ -64,6 +64,7 @@ public:
 
 	bool				m_bReliable;
 	bool				m_bInitMessage;
+	// Client filters normally contain only the local player; retain growable fallback.
 	CUtlVectorFixedGrowable< int, 1 >	m_Recipients;
 	// If using prediction rules, the filter itself suppresses local player
 	bool				m_bUsingPredictionRules;

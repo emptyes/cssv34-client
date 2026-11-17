@@ -2654,7 +2654,7 @@ CMouthInfo *C_BaseAnimating::GetMouth( void )
 #ifdef DEBUG_BONE_SETUP_THREADING
 ConVar cl_warn_thread_contested_bone_setup("cl_warn_thread_contested_bone_setup", "0" );
 #endif
-ConVar cl_threaded_bone_setup("cl_threaded_bone_setup", "0", 0, "Enable parallel processing of C_BaseAnimating::SetupBones()" );
+ConVar cl_threaded_bone_setup("cl_threaded_bone_setup", "0", FCVAR_ARCHIVE, "Enable parallel processing of C_BaseAnimating::SetupBones()" );
 
 //-----------------------------------------------------------------------------
 // Purpose: Do the default sequence blending rules as done in HL1
@@ -5977,7 +5977,8 @@ bool C_BoneFollower::ShouldDraw( void )
 int C_BoneFollower::DrawModel( int flags )
 {
 	vcollide_t *pCollide = modelinfo->GetVCollide( m_modelIndex );
-	if ( pCollide )
+	if ( pCollide && m_solidIndex >= 0 && m_solidIndex < pCollide->solidCount &&
+		 pCollide->solids && pCollide->solids[m_solidIndex] )
 	{
 		static color32 debugColor = {0,255,255,0};
 		matrix3x4_t matrix;
@@ -5990,7 +5991,9 @@ int C_BoneFollower::DrawModel( int flags )
 bool C_BoneFollower::TestCollision( const Ray_t &ray, unsigned int mask, trace_t& trace )
 {
 	vcollide_t *pCollide = modelinfo->GetVCollide( m_modelIndex );
-	Assert( pCollide && pCollide->solidCount > m_solidIndex );
+	if ( !pCollide || m_solidIndex < 0 || m_solidIndex >= pCollide->solidCount ||
+		 !pCollide->solids || !pCollide->solids[m_solidIndex] )
+		return false;
 
 	physcollision->TraceBox( ray, pCollide->solids[m_solidIndex], GetAbsOrigin(), GetAbsAngles(), &trace );
 

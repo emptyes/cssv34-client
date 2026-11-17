@@ -117,7 +117,7 @@ ConVar r_drawviewmodel( "r_drawviewmodel","1", FCVAR_CHEAT );
 #endif
 static ConVar r_drawtranslucentrenderables( "r_drawtranslucentrenderables", "1", FCVAR_CHEAT );
 static ConVar r_drawopaquerenderables( "r_drawopaquerenderables", "1", FCVAR_CHEAT );
-static ConVar r_threaded_renderables( "r_threaded_renderables", "0" );
+static ConVar r_threaded_renderables( "r_threaded_renderables", "0", FCVAR_ARCHIVE, "Parallel bone setup of visible renderables" );
 
 // FIXME: This is not static because we needed to turn it off for TF2 playtests
 ConVar r_DrawDetailProps( "r_DrawDetailProps", "1", FCVAR_NONE, "0=Off, 1=Normal, 2=Wireframe" );
@@ -260,12 +260,25 @@ class CWorldListCache
 {
 public:
 	CWorldListCache() = default;
+	~CWorldListCache()
+	{
+		m_UnusedEntries.PurgeAndDeleteElements();
+	}
 
 	void Flush()
 	{
 		for ( int i = m_Entries.FirstInorder(); i != m_Entries.InvalidIndex(); i = m_Entries.NextInorder( i ) )
 		{
-			delete m_Entries[i];
+			Entry_t *pEntry = m_Entries[i];
+			if ( m_UnusedEntries.Count() < MAX_REUSABLE_ENTRIES )
+			{
+				pEntry->Reset();
+				m_UnusedEntries.AddToTail( pEntry );
+			}
+			else
+			{
+				delete pEntry;
+			}
 		}
 		m_Entries.RemoveAll();
 	}
@@ -289,16 +302,32 @@ public:
 
 	void Add( const CViewSetup &viewSetup, IWorldRenderList *pList, ClientWorldListInfo_t *pListInfo )
 	{
-		m_Entries.Insert( new Entry_t( viewSetup, pList, pListInfo ) );
+		Entry_t *pEntry;
+		if ( m_UnusedEntries.Count() )
+		{
+			pEntry = m_UnusedEntries.Tail();
+			m_UnusedEntries.RemoveMultipleFromTail( 1 );
+			pEntry->Init( viewSetup, pList, pListInfo );
+		}
+		else
+		{
+			pEntry = new Entry_t( viewSetup, pList, pListInfo );
+		}
+		m_Entries.Insert( pEntry );
 	}
 
 private:
 	struct Entry_t
 	{
-		Entry_t( const CViewSetup &viewSetup, IWorldRenderList *pList = NULL, ClientWorldListInfo_t *pListInfo = NULL ) :
-			pList( ( pList ) ? InlineAddRef( pList ) : NULL ),
-			pListInfo( ( pListInfo ) ? InlineAddRef( pListInfo ) : NULL )
+		Entry_t( const CViewSetup &viewSetup, IWorldRenderList *pList = NULL, ClientWorldListInfo_t *pListInfo = NULL )
 		{
+			Init( viewSetup, pList, pListInfo );
+		}
+
+		void Init( const CViewSetup &viewSetup, IWorldRenderList *pList, ClientWorldListInfo_t *pListInfo )
+		{
+			this->pList = pList ? InlineAddRef( pList ) : NULL;
+			this->pListInfo = pListInfo ? InlineAddRef( pListInfo ) : NULL;
             // @NOTE (toml 8/18/2006): because doing memcmp, need to fill all of the fields and the padding!
 			memset( &m_bOrtho, 0, offsetof(Entry_t, pList ) - offsetof(Entry_t, m_bOrtho ) );
 			m_bOrtho = viewSetup.m_bOrtho;			
@@ -321,10 +350,17 @@ private:
 
 		~Entry_t()
 		{
+			Reset();
+		}
+
+		void Reset()
+		{
 			if ( pList )
 				pList->Release();
 			if ( pListInfo )
 				pListInfo->Release();
+			pList = NULL;
+			pListInfo = NULL;
 		}
 
 		// The fields from CViewSetup that would actually affect the list
@@ -361,6 +397,8 @@ private:
 	};
 
 	CUtlRBTree<Entry_t *, unsigned short, CEntryComparator> m_Entries;
+	enum { MAX_REUSABLE_ENTRIES = 32 };
+	CUtlVectorFixed<Entry_t *, MAX_REUSABLE_ENTRIES> m_UnusedEntries;
 };
 
 CWorldListCache g_WorldListCache;
@@ -1085,6 +1123,7 @@ void CViewRender::DrawViewModels( const CViewSetup &view, bool drawViewmodel )
 	if ( bShouldDrawPlayerViewModel || bShouldDrawToolViewModels )
 	{
 
+		// Local inline storage; larger lists still grow without limiting renderables.
 		CUtlVectorFixedGrowable< IClientRenderable *, 32 > opaqueViewModelList( 32 );
 		CUtlVectorFixedGrowable< IClientRenderable *, 32 > translucentViewModelList( 32 );
 
@@ -3963,7 +4002,9 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 	for ( int bucket = 0; bucket < RENDER_GROUP_CFG_NUM_OPAQUE_ENT_BUCKETS; ++ bucket )
 		numOpaqueEnts += m_pRenderablesList->m_RenderGroupCounts[ RENDER_GROUP_OPAQUE_ENTITY_HUGE + 2 * bucket ];
 
-	CUtlVector< C_BaseAnimating * > arrBoneSetupNpcsLast( (C_BaseAnimating **)_alloca( numOpaqueEnts * sizeof( C_BaseAnimating * ) ), numOpaqueEnts, numOpaqueEnts );
+	const bool bThreadedRenderables = r_threaded_renderables.GetBool();
+	const int numBoneSetupEnts = bThreadedRenderables ? numOpaqueEnts : 0;
+	CUtlVector< C_BaseAnimating * > arrBoneSetupNpcsLast( (C_BaseAnimating **)_alloca( numBoneSetupEnts * sizeof( C_BaseAnimating * ) ), numBoneSetupEnts, numBoneSetupEnts );
 	CUtlVector< CClientRenderablesList::CEntry > arrRenderEntsNpcsFirst( (CClientRenderablesList::CEntry *)_alloca( numOpaqueEnts * sizeof( CClientRenderablesList::CEntry ) ), numOpaqueEnts, numOpaqueEnts );
 	int numNpcs = 0, numNonNpcsAnimating = 0;
 
@@ -3981,14 +4022,15 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 				{
 					C_BaseAnimating *pba = assert_cast<C_BaseAnimating *>( pEntity );
 					arrRenderEntsNpcsFirst[ numNpcs ++ ] = *itEntity;
-					arrBoneSetupNpcsLast[ numOpaqueEnts - numNpcs ] = pba;
+					if ( bThreadedRenderables )
+						arrBoneSetupNpcsLast[ numOpaqueEnts - numNpcs ] = pba;
 					
 					itEntity->m_pRenderable = NULL;		// We will render NPCs separately
 					itEntity->m_RenderHandle = NULL;
 					
 					continue;
 				}
-				else if ( pEntity->GetBaseAnimating() )
+				else if ( bThreadedRenderables && pEntity->GetBaseAnimating() )
 				{
 					C_BaseAnimating *pba = assert_cast<C_BaseAnimating *>( pEntity );
 					arrBoneSetupNpcsLast[ numNonNpcsAnimating ++ ] = pba;
@@ -3998,7 +4040,7 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 		}
 	}
 
-	if ( r_threaded_renderables.GetBool() )
+	if ( bThreadedRenderables )
 	{
 		ParallelProcess( "BoneSetupNpcsLast", arrBoneSetupNpcsLast.Base() + numOpaqueEnts - numNpcs, numNpcs, &SetupBonesOnBaseAnimating );
 		ParallelProcess( "BoneSetupNpcsLast NonNPCs", arrBoneSetupNpcsLast.Base(), numNonNpcsAnimating, &SetupBonesOnBaseAnimating );

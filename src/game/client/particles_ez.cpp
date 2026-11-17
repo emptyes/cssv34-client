@@ -137,6 +137,9 @@ void AddFireParticle( const SimpleParticle *pParticle, PMaterialHandle hMaterial
 
 void DrawParticleSingletons( bool bInSkybox )
 {
+	// cl_particle_fallback_draw (#35): old-style effects are drawn here too
+	ParticleMgr()->DrawFallbackEffects( bInSkybox );
+
 	if ( g_pSimpleSingleton[bInSkybox].IsValid() )
 	{
 		g_pSimpleSingleton[bInSkybox]->GetBinding().DrawModel( 1 );

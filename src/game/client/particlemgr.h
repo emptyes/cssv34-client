@@ -402,6 +402,7 @@ public:
 	void			SetAlwaysSimulate( int bAlwaysSimulate )		{ SetFlag( FLAGS_ALWAYSSIMULATE, bAlwaysSimulate ); }
 
 	void			SetIsNewParticleSystem( void )		{ SetFlag( FLAGS_NEW_PARTICLE_SYSTEM, 1 ); }
+
 	// Draw this effect after the other translucent renderables (smoke grenades), so sprites,
 	// trails and beams behind or inside it can't be seen through it. See viewrender.cpp.
 	int				GetDrawAfterTranslucents() const				{ return GetFlag( FLAGS_DRAW_AFTER_TRANSLUCENTS ); }
@@ -660,6 +661,11 @@ public:
 	// Draw the effects marked with SetDrawBeforeViewModel.
 	void			DrawBeforeViewModelEffects();
 
+	// cl_particle_fallback_draw: draw old-style (CParticleEffectBinding) effects
+	// together with the particle singletons instead of through the leaf system.
+	// Called from DrawParticleSingletons at the start of every translucent pass.
+	void			DrawFallbackEffects( bool bInSkybox );
+
 	// Visible effects marked with SetDrawAfterTranslucents, returns the count filled in
 	int				GetDrawAfterTranslucentsEffects( CParticleEffectBinding **ppEffects, int nMaxEffects );
 
@@ -723,6 +729,7 @@ private:
 		const CViewSetup& view, const VMatrix &worldToPixels, float flFocalDist );
 
 	bool RetireParticleCollections( CParticleSystemDefinition* pDef, int nCount, RetireInfo_t *pInfo, float flScreenArea, float flMaxTotalArea );
+	// Keep common simulation lists on the stack; larger scenes still grow normally.
 	typedef CUtlVectorFixedGrowable< CNewParticleEffect*, 128 > ParticleSimList_t;
 	void BuildParticleSimList( ParticleSimList_t &list );
 	bool EarlyRetireParticleSystems( int nCount, CNewParticleEffect **ppEffects );

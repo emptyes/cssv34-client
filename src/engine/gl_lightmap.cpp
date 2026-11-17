@@ -9,6 +9,7 @@
 
 #include "render_pch.h"
 #include "gl_lightmap.h"
+#include "bitvec.h"
 #include "view.h"
 #include "gl_cvars.h"
 #include "zone.h"
@@ -377,21 +378,24 @@ unsigned int R_ComputeDynamicLightMask( dlight_t *pLights, SurfaceHandle_t surfI
 	if ( !g_bActiveDlights )
 		return 0;
 
-	int lightMask = 0;
-	for ( int lnum = 0, testBit = 1, mask = r_dlightactive; lnum < MAX_DLIGHTS; lnum++, mask >>= 1, testBit <<= 1 )
-	{
-		if ( mask & 1 )
-		{
-			// not lit by this light
-			if ( !(pLighting->m_fDLightBits & testBit ) )
-				continue;
+	const unsigned int mask = static_cast<unsigned int>( r_dlightactive ) & pLighting->m_fDLightBits;
+	if ( mask == 0 )
+		return 0;
 
+	const int firstLight = Plat_BitScanForward( mask );
+	const int lastLight = Plat_BitScanReverse( mask );
+	unsigned int lightMask = 0;
+	unsigned int testBit = 1u << firstLight;
+	for ( int lnum = firstLight; lnum <= lastLight; lnum++, testBit <<= 1 )
+	{
+		if ( mask & testBit )
+		{
 			// This light doesn't affect the world
 			if ( pLights[lnum].flags & (DLIGHT_NO_WORLD_ILLUMINATION|DLIGHT_DISPLACEMENT_MASK))
 				continue;
 
 			// This is used to ensure a maximum number of dlights in a frame
-			if ( !R_CanUseVisibleDLight( lnum ) ) 
+			if ( !R_CanUseVisibleDLight( lnum ) )
 				continue;
 
 			// Cull surface to light radius

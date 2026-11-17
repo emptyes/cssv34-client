@@ -133,10 +133,10 @@ bool VoiceRecord_DSound::RecordStart()
 
 	DWORD dwReadPos;
 	hr = m_pCaptureBuffer->GetCurrentPosition(NULL, &dwReadPos);
-	if (!FAILED(hr))
-	{
-		m_LastReadPos = dwReadPos + m_WrapOffset;
-	}
+	if (FAILED(hr))
+		return false;
+
+	m_LastReadPos = dwReadPos + m_WrapOffset;
 
 	return true;
 }
@@ -271,7 +271,7 @@ void VoiceRecord_DSound::Term()
 		m_pCapture->Release();
 
 	if(m_hWrapEvent)
-		DeleteObject(m_hWrapEvent);
+		CloseHandle(m_hWrapEvent);
 
 	if(m_hInstDS)
 	{
@@ -307,6 +307,9 @@ int VoiceRecord_DSound::GetRecordedData( short *pOut, int nSamples )
 		return 0;
 	}
 
+	if ( nSamples <= 0 || !NumCaptureBufferBytes() )
+		return 0;
+
 	DWORD dwStatus;
 	HRESULT hr = m_pCaptureBuffer->GetStatus(&dwStatus);
 	if(FAILED(hr) || !(dwStatus & DSCBSTATUS_CAPTURING))
@@ -314,29 +317,30 @@ int VoiceRecord_DSound::GetRecordedData( short *pOut, int nSamples )
 
 	Idle();	// Update wrapping..
 
-	DWORD nBytesWanted = (DWORD)( nSamples << 1 );
+	const DWORD nBytesWanted = Min( (DWORD)nSamples, NumCaptureBufferBytes() / 2 ) * 2;
 
 	DWORD dwReadPos;
 	hr = m_pCaptureBuffer->GetCurrentPosition( NULL, &dwReadPos);
 	if(FAILED(hr))
 		return 0;
 
-	dwReadPos += m_WrapOffset;
+	const DWORD unwrappedReadPos = dwReadPos + m_WrapOffset;
+	const DWORD nBytesToRead = Min( nBytesWanted,
+		Min( unwrappedReadPos - m_LastReadPos, NumCaptureBufferBytes() ) );
+	if ( !nBytesToRead )
+		return 0;
 
-	// Read the range (dwReadPos-nSamplesWanted, dwReadPos), but don't re-read data we've already read.
-	DWORD readStart = Max( dwReadPos - nBytesWanted, (DWORD)0u );
-	if ( readStart < m_LastReadPos )
-	{
-		readStart = m_LastReadPos;
-	}
+	// Select the newest unread bytes using the physical cursor, even after DWORD wrap.
+	const DWORD readStart = ( dwReadPos >= nBytesToRead ) ? dwReadPos - nBytesToRead :
+		NumCaptureBufferBytes() - ( nBytesToRead - dwReadPos );
 
 	// Lock the buffer.
 	LPVOID pData[2];
 	DWORD dataLen[2];
 
 	hr = m_pCaptureBuffer->Lock(
-		readStart % NumCaptureBufferBytes(),	// Offset.
-		dwReadPos - readStart,					// Number of bytes to lock.
+		readStart,							// Offset.
+		nBytesToRead,						// Number of bytes to lock.
 		&pData[0],								// Buffer 1.
 		&dataLen[0],							// Buffer 1 length.
 		&pData[1],								// Buffer 2.
@@ -362,7 +366,7 @@ int VoiceRecord_DSound::GetRecordedData( short *pOut, int nSamples )
 	m_pCaptureBuffer->Unlock(pData[0], dataLen[0], pData[1], dataLen[1]);
 
 	// Last Read Position
-	m_LastReadPos = dwReadPos;
+	m_LastReadPos = unwrappedReadPos;
 	// Return sample count (not bytes)
 	return (dataLen[0] + dataLen[1]) >> 1;
 }

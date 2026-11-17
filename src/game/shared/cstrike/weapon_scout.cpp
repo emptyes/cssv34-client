@@ -43,6 +43,10 @@ private:
 	CWeaponScout(const CWeaponScout&);
 
 	void SCOUTFire(float flSpread);
+	virtual float GetInaccuracy() const;
+
+	// spread of the shot being fired (SCOUTFire unzooms before CSBaseGunFire), -1 otherwise
+	float m_flFireSpread;
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED(WeaponScout, DT_WeaponScout)
@@ -60,6 +64,7 @@ PRECACHE_WEAPON_REGISTER(weapon_scout);
 
 CWeaponScout::CWeaponScout()
 {
+	m_flFireSpread = -1.0f;
 }
 
 void CWeaponScout::SecondaryAttack()
@@ -151,12 +156,51 @@ void CWeaponScout::SCOUTFire(float flSpread)
 #endif
 	}
 
-	if (!CSBaseGunFire(GetCSWpnData().m_flCycleTime, Primary_Mode))
+	// CSBaseGunFire reads the spread from GetInaccuracy(); the zoom state has just changed
+	// above, so hand it the spread computed for this shot.
+	m_flFireSpread = flSpread;
+	bool bFired = CSBaseGunFire(GetCSWpnData().m_flCycleTime, Primary_Mode);
+	m_flFireSpread = -1.0f;
+
+	if (!bFired)
 		return;
 
 	QAngle angle = pPlayer->GetPunchAngle();
 	angle.x -= 2;
 	pPlayer->SetPunchAngle(angle);
+}
+
+
+// v34 spread, CSBaseGunFire takes it from GetInaccuracy() (see SCOUTFire)
+float CWeaponScout::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( m_flFireSpread >= 0.0f )
+			return m_flFireSpread;
+
+		float fSpread;
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			fSpread = 0.2f;
+		else if ( pPlayer->GetAbsVelocity().Length2D() > 170 )
+			fSpread = 0.075f;
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			fSpread = 0.0f;
+		else
+			fSpread = 0.007f;
+
+		// If we are not zoomed in, or we have very recently zoomed and are still transitioning, the bullet diverts more.
+		if ( pPlayer->GetFOV() == pPlayer->GetDefaultFOV() || ( gpGlobals->curtime < m_zoomFullyActiveTime ) )
+			fSpread += 0.025f;
+
+		return fSpread;
+	}
+
+	return BaseClass::GetInaccuracy();
 }
 
 

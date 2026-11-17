@@ -35,6 +35,16 @@ extern ConVar overview_alpha;
 extern ConVar cl_radaralpha;
 ConVar cl_radar_locked( "cl_radar_locked", "0", FCVAR_ARCHIVE, "Lock the angle of the radar display?" );
 
+// Radar customization (also exposed in Options -> Extra)
+static void RadarSettingsChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	if ( g_pMapOverview && g_pMapOverview->GetMode() == CMapOverview::MAP_MODE_RADAR )
+		g_pMapOverview->SetMode( CMapOverview::MAP_MODE_RADAR ); // re-apply zoom/size/icons
+}
+ConVar cl_radar_scale( "cl_radar_scale", "1.0", FCVAR_ARCHIVE, "Radar view distance: >1 shows more of the map, <1 zooms in", true, 0.25f, true, 4.0f, RadarSettingsChanged );
+ConVar cl_radar_size( "cl_radar_size", "1.0", FCVAR_ARCHIVE, "Radar size on screen (multiplier)", true, 0.5f, true, 2.5f, RadarSettingsChanged );
+ConVar cl_radar_icon_scale( "cl_radar_icon_scale", "1.0", FCVAR_ARCHIVE, "Radar icon size (multiplier)", true, 0.3f, true, 3.0f, RadarSettingsChanged );
+
 void PreferredOverviewModeChanged( IConVar *pConVar, const char *oldString, float flOldValue )
 {
 	ConVarRef var( pConVar );
@@ -1964,8 +1974,12 @@ void CCSMapOverview::SetMode(int mode)
 		m_flChangeSpeed = 0; // change size instantly
 		// We want the _output_ of the radar to be consistant, so we need to take the map scale in to account.
 		float desiredZoom = (DESIRED_RADAR_RESOLUTION * m_fMapScale) / (OVERVIEW_MAP_SIZE * m_fFullZoom);
+		desiredZoom /= cl_radar_scale.GetFloat(); // custom view distance
 
 		g_pClientMode->GetViewportAnimationController()->RunAnimationCommand( this, "zoom", desiredZoom, 0.0, 0, vgui::AnimationController::INTERPOLATOR_LINEAR );
+
+		// icons are sized in world units: compensate the zoom so they keep their on-screen size
+		m_flIconSize = 64.0f * cl_radar_scale.GetFloat() * cl_radar_icon_scale.GetFloat();
 
 		if( CBasePlayer::GetLocalPlayer() )
 			SetFollowEntity( CBasePlayer::GetLocalPlayer()->entindex() );
@@ -1975,6 +1989,7 @@ void CCSMapOverview::SetMode(int mode)
 	}
 	else if ( mode == MAP_MODE_INSET )
 	{
+		m_flIconSize = 64.0f;
 		SetPaintBackgroundType( 2 );// rounded corners
 
 		float desiredZoom = (overview_preferred_view_size.GetFloat() * m_fMapScale) / (OVERVIEW_MAP_SIZE * m_fFullZoom);
@@ -1983,6 +1998,7 @@ void CCSMapOverview::SetMode(int mode)
 	}
 	else 
 	{
+		m_flIconSize = 64.0f;
 		SetPaintBackgroundType( 0 );// square corners
 
 		float desiredZoom = 1.0f;
@@ -2014,6 +2030,7 @@ void CCSMapOverview::UpdateSizeAndPosition()
 				m_vPosition.y += g_pSpectatorGUI->GetTopBarHeight();
 			}
 
+			w = (int)( w * cl_radar_size.GetFloat() );
 			m_vSize.x = w;
 			m_vSize.y = w;// Intentionally not 't'.  We need to enforce square-ness to prevent people from seeing more of the map by fiddling their HudLayout
 			break;

@@ -72,6 +72,7 @@ END_NETWORK_TABLE()
 
 #ifdef CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponGlock )
+	// Restore all shot-dependent state before replaying unacknowledged commands.
 	DEFINE_PRED_FIELD( m_bBurstMode, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_iGlock18ShotsFired, FIELD_INTEGER, 0 ),
 	DEFINE_PRED_FIELD( m_flGlock18Shoot, FIELD_FLOAT, 0 ),

@@ -4521,9 +4521,24 @@ void C_BaseEntity::InitPredictable( void )
 
 	// Copy original data into all prediction slots, so we don't get an error saying we "mispredicted" any
 	//  values which are still at their initial values
-	for ( int i = 0; i < MULTIPLAYER_BACKUP; i++ )
+	SaveData( "InitPredictable", 0, PC_EVERYTHING );
+	static ConVarRef pwatchent( "pwatchent" );
+	if ( pwatchent.GetInt() == entindex() )
 	{
-		SaveData( "InitPredictable", i, PC_EVERYTHING );
+		for ( int i = 1; i < MULTIPLAYER_BACKUP; i++ )
+		{
+			SaveData( "InitPredictable", i, PC_EVERYTHING );
+		}
+	}
+	else
+	{
+		const void *pInitialData = GetPredictedFrame( 0 );
+		size_t dataSize = GetIntermediateDataSize();
+		for ( int i = 1; i < MULTIPLAYER_BACKUP; i++ )
+		{
+			Q_memcpy( GetPredictedFrame( i ), pInitialData, dataSize );
+		}
+		m_nIntermediateDataCount = MULTIPLAYER_BACKUP - 1;
 	}
 #endif
 }

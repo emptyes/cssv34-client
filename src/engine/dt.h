@@ -105,17 +105,29 @@ FORCEINLINE unsigned int CDeltaBitsReader::ReadNextPropIndex()
 {
 	Assert( m_pBuf );
 
+	if ( m_pBuf->IsOverflowed() )
+	{
+		ForceFinished();
+		return -1;
+	}
+
 	if (!m_pBuf->ReadOneBit())
 	{
 		ForceFinished();
 		return -1;
 	}
 
-	int prop = m_pBuf->ReadUBitVar() + 1;
-	prop += m_iLastProp;
-	m_iLastProp = prop;
+	unsigned int delta = m_pBuf->ReadUBitVar();
+	if ( m_pBuf->IsOverflowed() || delta >= MAX_DATATABLE_PROPS ||
+		m_iLastProp + (int)delta + 1 >= MAX_DATATABLE_PROPS )
+	{
+		m_pBuf->SetOverflowFlag();
+		ForceFinished();
+		return -1;
+	}
 
-	return prop;
+	m_iLastProp += (int)delta + 1;
+	return m_iLastProp;
 }
 
 FORCEINLINE void CDeltaBitsReader::SkipPropData( const SendProp *pProp )

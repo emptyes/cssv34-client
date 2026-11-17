@@ -9,6 +9,7 @@
 #include "iframeencoder.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <opus/opus.h>
 
 // NOTE: This has to be the last file included!
@@ -34,6 +35,7 @@ public:
 	bool ResetState();
 
 private:
+	void TermStates();
 	OpusEncoder* m_Encoder;
 	OpusDecoder* m_Decoder;
 };
@@ -60,22 +62,39 @@ VoiceEncoder_Opus::VoiceEncoder_Opus()
 
 VoiceEncoder_Opus::~VoiceEncoder_Opus()
 {
+	TermStates();
+}
+
+void VoiceEncoder_Opus::TermStates()
+{
 	if (m_Encoder) opus_encoder_destroy(m_Encoder);
+	m_Encoder = nullptr;
 	if (m_Decoder) opus_decoder_destroy(m_Decoder);
+	m_Decoder = nullptr;
 }
 
 bool VoiceEncoder_Opus::Init( int quality, int &rawFrameSize, int &encodedFrameSize)
 {
+	// Reinitialization must release the previous encoder and decoder.
+	TermStates();
 	rawFrameSize = RAW_FRAME_SIZE * BYTES_PER_SAMPLE;
 
 	encodedFrameSize = PACKET_SIZE;
 
     int err;
     m_Encoder = opus_encoder_create(48000, 1, OPUS_APPLICATION_VOIP, &err);
-    if (err != OPUS_OK) return false;
+    if (err != OPUS_OK || !m_Encoder)
+    {
+        TermStates();
+        return false;
+    }
 
     m_Decoder = opus_decoder_create(48000, 1, &err);
-    if (err != OPUS_OK) return false;
+    if (err != OPUS_OK || !m_Decoder)
+    {
+        TermStates();
+        return false;
+    }
 
 	opus_encoder_ctl(m_Encoder, 0x00000FA8, 0x00000000, 0x00000450);
 	opus_encoder_ctl(m_Encoder, 0x00000FC8, 0x00000000, 0x0000138B);
@@ -101,10 +120,16 @@ void VoiceEncoder_Opus::DecodeFrame(const char *pCompressed, char *pDecompressed
 	short* out = (short*)pDecompressedBytes;
 	int frame_size = opus_decode(m_Decoder, (const unsigned char*)pCompressed, 28, out, 480, 0);
 	if (frame_size < 0) frame_size = 0;
+	// The frame codec publishes a full frame, including on short/error replies.
+	if ( frame_size < RAW_FRAME_SIZE )
+		memset( out + frame_size, 0, (RAW_FRAME_SIZE - frame_size) * sizeof( *out ) );
 }
 
 bool VoiceEncoder_Opus::ResetState()
 {
+	if ( !m_Encoder || !m_Decoder )
+		return false;
+
 	opus_encoder_ctl(m_Encoder, OPUS_RESET_STATE);
 	opus_decoder_ctl(m_Decoder, OPUS_RESET_STATE);
 

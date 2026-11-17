@@ -50,7 +50,6 @@ public:
 	virtual void SetPosition( unsigned int position );
 private:
 
-    short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
 	mp3dec_ex_t mp3d;
 	mp3dec_io_t mp3io;
 	struct AudioStream_s audio_stream;

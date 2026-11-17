@@ -501,7 +501,9 @@ void CNetworkStringTable::UpdateMirrorTable( int tick_ack  )
 
 int CNetworkStringTable::WriteUpdate( CBaseClient *client, bf_write &buf, int tick_ack )
 {
-	CUtlVector< StringHistoryEntry > history;
+	// The wire history is capped at 32 entries; keep its storage local to this call.
+	StringHistoryEntry historyStorage[32];
+	CUtlVector< StringHistoryEntry > history( historyStorage, ARRAYSIZE( historyStorage ) );
 
 	int entriesUpdated = 0;
 	int lastEntry = -1;
@@ -611,11 +613,25 @@ int CNetworkStringTable::WriteUpdate( CBaseClient *client, bf_write &buf, int ti
 //-----------------------------------------------------------------------------
 // Purpose: Parse string update
 //-----------------------------------------------------------------------------
+static void RejectStringTableUpdate( bf_read &buf, const char *tableName )
+{
+	buf.SetOverflowFlag();
+	Warning( "Malformed update for string table '%s'\n", tableName );
+}
+
 void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 {
 	int lastEntry = -1;
 
-	CUtlVector< StringHistoryEntry > history;
+	// The wire history is capped at 32 entries; keep its storage local to this call.
+	StringHistoryEntry historyStorage[32];
+	CUtlVector< StringHistoryEntry > history( historyStorage, ARRAYSIZE( historyStorage ) );
+
+	if ( entries < 0 || buf.IsOverflowed() )
+	{
+		RejectStringTableUpdate( buf, GetTableName() );
+		return;
+	}
 
 	for (int i=0; i<entries; i++)
 	{
@@ -628,9 +644,10 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 
 		lastEntry = entryIndex;
 		
-		if ( entryIndex < 0 || entryIndex >= GetMaxStrings() )
+		if ( buf.IsOverflowed() || entryIndex < 0 || entryIndex >= GetMaxStrings() )
 		{
-			Host_Error( "Server sent bogus string index %i for table %s\n", entryIndex, GetTableName() );
+			RejectStringTableUpdate( buf, GetTableName() );
+			return;
 		}
 
 		const char *pEntry = NULL;
@@ -645,18 +662,28 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 			{
 				unsigned int index = buf.ReadUBitLong( 5 );
 				unsigned int bytestocopy = buf.ReadUBitLong( SUBSTRING_BITS );
-				if ( index >= (unsigned int)history.Count() )
+				if ( buf.IsOverflowed() || index >= (unsigned int)history.Count() ||
+					bytestocopy > (unsigned int)Q_strlen( history[ index ].string ) )
 				{
-					Host_Error( "Server sent bogus substring index %i for table %s\n",
-					            entryIndex, GetTableName() );
+					RejectStringTableUpdate( buf, GetTableName() );
+					return;
 				}
 				Q_strncpy( entry, history[ index ].string, Min( sizeof( entry ), (size_t)bytestocopy + 1 ) );
-				buf.ReadString( substr, sizeof(substr) );
+				if ( !buf.ReadString( substr, sizeof(substr) ) ||
+					(size_t)bytestocopy + Q_strlen( substr ) >= sizeof( entry ) )
+				{
+					RejectStringTableUpdate( buf, GetTableName() );
+					return;
+				}
 				Q_strncat( entry, substr, sizeof(entry), COPY_ALL_CHARACTERS );
 			}
 			else
 			{
-				buf.ReadString( entry, sizeof( entry ) );
+				if ( !buf.ReadString( entry, sizeof( entry ) ) )
+				{
+					RejectStringTableUpdate( buf, GetTableName() );
+					return;
+				}
 			}
 
 			pEntry = entry;
@@ -664,7 +691,6 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 		
 		// Read in the user data.
 		unsigned char tempbuf[ CNetworkStringTableItem::MAX_USERDATA_SIZE ];
-		memset( tempbuf, 0, sizeof( tempbuf ) );
 		const void *pUserData = NULL;
 		int nBytes = 0;
 
@@ -674,21 +700,37 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 			{
 				// Don't need to read length, it's fixed length and the length was networked down already.
 				nBytes = GetUserDataSize();
-				Assert( nBytes > 0 );
-				tempbuf[nBytes-1] = 0; // be safe, clear last byte
+				if ( nBytes <= 0 || nBytes > (int)sizeof( tempbuf ) ||
+					GetUserDataSizeBits() < 0 || GetUserDataSizeBits() > nBytes * 8 ||
+					GetUserDataSizeBits() > buf.GetNumBitsLeft() )
+				{
+					RejectStringTableUpdate( buf, GetTableName() );
+					return;
+				}
+				memset( tempbuf, 0, nBytes );
 				buf.ReadBits( tempbuf, GetUserDataSizeBits() );
 			}
 			else
 			{
 				nBytes = buf.ReadUBitLong( CNetworkStringTableItem::MAX_USERDATA_BITS );
-				ErrorIfNot( nBytes <= sizeof( tempbuf ),
-					("CNetworkStringTableClient::ParseUpdate: message too large (%d bytes).", nBytes)
-				);
+				if ( buf.IsOverflowed() || nBytes > (int)sizeof( tempbuf ) ||
+					nBytes * 8 > buf.GetNumBitsLeft() )
+				{
+					RejectStringTableUpdate( buf, GetTableName() );
+					return;
+				}
 
 				buf.ReadBytes( tempbuf, nBytes );
 			}
 
 			pUserData = tempbuf;
+		}
+
+		if ( buf.IsOverflowed() ||
+			( entryIndex >= GetNumStrings() && ( entryIndex != GetNumStrings() || pEntry == NULL ) ) )
+		{
+			RejectStringTableUpdate( buf, GetTableName() );
+			return;
 		}
 
 		// Check if we are updating an old entry or adding a new one
@@ -708,12 +750,6 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 			// Grow the table (entryindex must be the next empty slot)
 			Assert( (entryIndex == GetNumStrings()) && (pEntry != NULL) );
 				
-			if ( pEntry == NULL )
-			{
-				Msg("CNetworkStringTable::ParseUpdate: NULL pEntry, table %s, index %i\n", GetTableName(), entryIndex );
-				pEntry = "";// avoid crash because of NULL strings
-			}
-
 			AddString( true, pEntry, nBytes, pUserData );
 		}
 
@@ -1494,13 +1530,13 @@ bool CNetworkStringTableContainer::ReadStringTables( bf_read& buf )
 		Assert( table );
 
 		// Now read the data for the table
-		if ( table && !table->ReadStringTable( buf ) )
-		{
-			Host_Error( "Error reading string table %s\n", tablename );
-		}
-		else
+		if ( !table )
 		{
 			Warning( "Could not find table \"%s\"\n", tablename );
+		}
+		else if ( !table->ReadStringTable( buf ) )
+		{
+			Host_Error( "Error reading string table %s\n", tablename );
 		}
 	}
 

@@ -1859,6 +1859,11 @@ extern "C" void __cdecl WriteSteamMiniDumpWithComment( unsigned int uStructuredE
 	}
 
 	SteamAPI_WriteMiniDump( uStructuredExceptionCode, pExceptionInfo, build_number() );
+#if defined( _WIN32 )
+	// stub_steam does not write minidumps, so write one ourselves (next to hl2_launcher.exe)
+	WriteMiniDumpUsingExceptionInfo( uStructuredExceptionCode, pExceptionInfo,
+		0x00000041 /* MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory */, pszFilenameSuffix );
+#endif
 	// Clear DSound Buffers so the sound doesn't loop while the game shuts down
 	try
 	{

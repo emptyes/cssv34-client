@@ -76,6 +76,7 @@
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
+#include "tier0/minidump.h"
 #include "tier0/memdbgon.h"
 
 #define ONE_HUNDRED_TWENTY_EIGHT_MB	(128 * 1024 * 1024)
@@ -487,7 +488,7 @@ void Sys_Error_Internal( bool bMinidump, const char *error, va_list argsList )
 		}
 		// Write the minidump from inside the filter (GetExceptionInformation() is only 
 		// valid in the filter)
-		__except ( SteamAPI_WriteMiniDump( 0, GetExceptionInformation(), build_number() ), EXCEPTION_EXECUTE_HANDLER )
+		__except ( WriteMiniDumpUsingExceptionInfo( 0, GetExceptionInformation(), 0x00000041, "syserror" ), EXCEPTION_EXECUTE_HANDLER )
 		{
 
 			// We always get here because the above filter evaluates to EXCEPTION_EXECUTE_HANDLER

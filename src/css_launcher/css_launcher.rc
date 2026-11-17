@@ -1,0 +1,4 @@
+#include "resource.h"
+#include <windows.h>
+
+IDI_LAUNCHER	ICON	"..\\launcher\\res\\launcher.ico"

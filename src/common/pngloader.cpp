@@ -7,6 +7,7 @@
 #include "pngloader.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 //#include "vstdlib/strtools.h"
 
 #include <setjmp.h>
@@ -28,31 +29,30 @@ struct PngDataStream_t
 	PngDataStream_t( const byte *pchData, int cbData )
 	{
 		m_pPNGData = pchData;
-		m_cbPNGData = cbData;
+		m_cbPNGData = cbData > 0 ? (size_t)cbData : 0;
 		m_iPNGData = 0;
 	}
 
 	const byte *m_pPNGData; // the png data
-	uint32 m_cbPNGData; // length of the data
-	uint32 m_iPNGData; // offset for next read
+	size_t m_cbPNGData; // length of the data
+	size_t m_iPNGData; // offset for next read
 };
 
 
 // helper function to nibble some more png data from our memory buffer
 void ReadPNGData( png_structp png_ptr, png_bytep outBytes, png_size_t byteCountToRead )
 {
-	if(png_get_io_ptr(png_ptr) == NULL)
-		return;   // we didn't have our mem buffer set
-
-	PngDataStream_t *pData = (PngDataStream_t *)png_get_io_ptr(png_ptr);
-
-	if ( byteCountToRead + pData->m_iPNGData > pData->m_cbPNGData )
+	PngDataStream_t *pData = (PngDataStream_t *)png_get_io_ptr( png_ptr );
+	if ( !pData || !pData->m_pPNGData || pData->m_iPNGData > pData->m_cbPNGData ||
+		byteCountToRead > pData->m_cbPNGData - pData->m_iPNGData )
+	{
+		png_error( png_ptr, "Unexpected end of PNG data" );
 		return;
+	}
 
 	Q_memcpy( outBytes, pData->m_pPNGData + pData->m_iPNGData, byteCountToRead );
 	pData->m_iPNGData += byteCountToRead;
 }
-
 
 // called when we failed to load a png file, we just bail to the previously set exit
 static void PNGErrorFunction(png_structp png_ptr, png_const_charp msg) 
@@ -72,6 +72,9 @@ static void PNGWarningFunction(png_structp png_ptr, png_const_charp msg)
 // Get dimensions out of PNG header
 bool GetPNGDimensions( const byte *pubPNGData, int cubPNGData, uint32 &width, uint32 &height )
 {
+	if ( !pubPNGData || cubPNGData < 8 )
+		return false;
+
 	png_const_bytep pngData = (png_const_bytep)pubPNGData;
 	if (png_sig_cmp( pngData, 0, 8))
         return false;   /* bad signature */
@@ -114,6 +117,9 @@ bool GetPNGDimensions( const byte *pubPNGData, int cubPNGData, uint32 &width, ui
 // given a png formatted memory buffer return a raw rgba buffer
 bool ConvertPNGToRGBA( const byte *pubPNGData, int cubPNGData, CUtlBuffer &bufOutput, int &width, int &height )
 {
+	if ( !pubPNGData || cubPNGData < 8 )
+		return false;
+
 	png_const_bytep pngData = (png_const_bytep)pubPNGData;
 	if (png_sig_cmp( pngData, 0, 8))
         return false;   /* bad signature */
@@ -160,76 +166,45 @@ bool ConvertPNGToRGBA( const byte *pubPNGData, int cubPNGData, CUtlBuffer &bufOu
 
 	png_get_IHDR( png_ptr, info_ptr, &png_width, &png_height, &bit_depth, &color_type, NULL, NULL, NULL );
 
-	width = png_width;
-	height = png_height;
+	if ( !png_width || !png_height || png_width > INT_MAX / 4 ||
+		png_height > (png_uint_32)INT_MAX / ( png_width * 4 ) )
+		png_error( png_ptr, "PNG dimensions exceed output buffer limits" );
 
-    png_uint_32 rowbytes;
+	if ( color_type == PNG_COLOR_TYPE_PALETTE ||
+		( color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8 ) )
+		png_set_expand( png_ptr );
+	const bool hasTransparency = png_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) != 0;
+	if ( hasTransparency )
+		png_set_tRNS_to_alpha( png_ptr );
+	if ( bit_depth == 16 )
+		png_set_strip_16( png_ptr );
+	if ( color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA )
+		png_set_gray_to_rgb( png_ptr );
+	if ( !( color_type & PNG_COLOR_MASK_ALPHA ) && !hasTransparency )
+		png_set_filler( png_ptr, 0xff, PNG_FILLER_AFTER );
 
-    /* expand palette images to RGB, low-bit-depth grayscale images to 8 bits,
-     * transparency chunks to full alpha channel; strip 16-bit-per-sample
-     * images to 8 bits per sample; and convert grayscale to RGB[A] */
+	const int passes = png_set_interlace_handling( png_ptr );
+	png_read_update_info( png_ptr, info_ptr );
 
-    if (color_type == PNG_COLOR_TYPE_PALETTE)
-        png_set_expand( png_ptr );
-    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
-        png_set_expand( png_ptr );
-    if (png_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) )
-        png_set_expand( png_ptr );
-    if (bit_depth == 16)
-        png_set_strip_16( png_ptr );
-    if (color_type == PNG_COLOR_TYPE_GRAY ||
-        color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
-        png_set_gray_to_rgb( png_ptr );
+	const png_size_t rowbytes = png_get_rowbytes( png_ptr, info_ptr );
+	if ( png_get_channels( png_ptr, info_ptr ) != 4 || rowbytes != (size_t)png_width * 4 ||
+		rowbytes > (size_t)INT_MAX / png_height )
+		png_error( png_ptr, "Invalid PNG output layout" );
 
-  /*
-	double gamma;
-  if (png_get_gAMA(png_ptr, info_ptr, &gamma))
-        png_set_gamma(png_ptr, display_exponent, gamma);
-
-*/
-    /* all transformations have been registered; now update info_ptr data,
-     * get rowbytes and channels, and allocate image memory */
-
-    png_read_update_info( png_ptr, info_ptr );
-
-    rowbytes = png_get_rowbytes( png_ptr, info_ptr );
-    png_byte channels = (int)png_get_channels( png_ptr, info_ptr );
-	Assert( channels == 4 );
-	if ( channels != 4 )
-		return false;
-
-	png_bytepp  row_pointers = NULL;
-
-	if ( ( row_pointers = (png_bytepp)malloc(height*sizeof(png_bytep) ) ) == NULL ) 
+	const int outputBytes = (int)( rowbytes * png_height );
+	bufOutput.EnsureCapacity( outputBytes );
+	bufOutput.SeekPut( CUtlBuffer::SEEK_HEAD, outputBytes );
+	if ( passes > 1 )
+		Q_memset( bufOutput.Base(), 0, outputBytes );
+	for ( int pass = 0; pass < passes; ++pass )
 	{
-        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
-		return false;
-    }
-
-	bufOutput.EnsureCapacity( rowbytes*height );
-	bufOutput.SeekPut( CUtlBuffer::SEEK_HEAD, rowbytes*height );
-
-    /* set the individual row_pointers to point at the correct offsets */
-
-    for ( int i = 0;  i < height;  ++i)
-        row_pointers[i] = (png_byte *)bufOutput.Base() + i*rowbytes;
-
-
-    /* now we can go ahead and just read the whole image */
-
-    png_read_image( png_ptr, row_pointers );
-
-    free( row_pointers );
-    row_pointers = NULL;
-
-    png_read_end(png_ptr, NULL);
-
-	if ( png_ptr && info_ptr ) 
-	{
-		png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
-		png_ptr = NULL;
-		info_ptr = NULL;
+		for ( png_uint_32 row = 0; row < png_height; ++row )
+			png_read_row( png_ptr, (png_bytep)bufOutput.Base() + (size_t)row * rowbytes, NULL );
 	}
+	png_read_end( png_ptr, NULL );
+	png_destroy_read_struct( &png_ptr, &info_ptr, NULL );
 
+	width = (int)png_width;
+	height = (int)png_height;
 	return true;
 }

@@ -172,8 +172,7 @@ void CNetChan::CompressFragments()
 			// fragments data is in memory
 			unsigned int compressedSize = NET_MAX_PAYLOAD_V23;
 			char * compressedData = new char[ compressedSize ];
-			
-			// blockSize100k: 9 (max compression), workFactor: 0x1Eu (default)
+
 			if ( BZ2_bzBuffToBuffCompress( compressedData, &compressedSize, data->buffer, data->bytes, 9, 0, 30 ) == BZ_OK &&
 				( compressedSize < data->bytes ) )
 			{
@@ -270,25 +269,28 @@ void CNetChan::CompressFragments()
 	}
 }
 
-void CNetChan::UncompressFragments( dataFragments_t *data )
+bool CNetChan::UncompressFragments( dataFragments_t *data )
 {
 	if ( !data->isCompressed )
-		return;
+		return true;
+
+	// reject absurd sizes from the network before allocating
+	if ( data->nUncompressedSize == 0 || data->nUncompressedSize > MAX_FILE_SIZE )
+		return false;
 
 	// allocate buffer for uncompressed data, align to 4 bytes boundary
 	char *newbuffer = new char[PAD_NUMBER( data->nUncompressedSize, 4 )];
 	unsigned int uncompressedSize = data->nUncompressedSize;
 
 	// uncompress data
-	int retVal = BZ2_bzBuffToBuffDecompress( 
-		newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
+	int result = BZ2_bzBuffToBuffDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes, 0, 0 );
 
 	// client spoofed the file size or the fragments're just bad
-	if ( retVal != BZ_OK || uncompressedSize != data->nUncompressedSize )
+	if ( result != BZ_OK || uncompressedSize != data->nUncompressedSize )
 	{
-		DevMsg("Received corrupted bzip-compressed data from %s (%i).\n", GetAddress(), retVal);
-		delete[] newbuffer;
-		return;
+		ConDMsg( "UncompressFragments: bad compressed data from %s (%d)\n", GetAddress(), result );
+		delete [] newbuffer;
+		return false;
 	}
 
 	// free old buffer and set new buffer
@@ -296,6 +298,7 @@ void CNetChan::UncompressFragments( dataFragments_t *data )
 	data->buffer = newbuffer;
 	data->bytes = uncompressedSize;
 	data->isCompressed = false;
+	return true;
 }
 
 unsigned int CNetChan::RequestFile(const char *filename)
@@ -1322,7 +1325,12 @@ bool CNetChan::SendSubChannelData( bf_write &buf )
 
 bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 {
-	dataFragments_t * data = &m_ReceiveList[stream]; // get list
+	dataFragments_t *pReceiveData = &m_ReceiveList[stream];
+	dataFragments_t incoming = {};
+	if ( pReceiveData->buffer )
+		incoming = *pReceiveData;
+	dataFragments_t *data = &incoming;
+	char *pOldBuffer = NULL;
 	int startFragment = 0;
 	int numFragments = 0;
 	unsigned int offset = 0;
@@ -1382,13 +1390,11 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 			data->bytes = buf.ReadUBitLong( MAX_FILE_SIZE_BITS );
 		}
 
-		if ( data->buffer )
-		{
-			// last transmission was aborted, free data
-			delete [] data->buffer;
-			data->buffer = NULL;
-			ConDMsg( "Fragment transmission aborted at %i/%i from %s.\n", data->ackedFragments, data->numFragments, GetAddress() );
-		}
+		if ( buf.IsOverflowed() )
+			return false;
+
+		pOldBuffer = data->buffer;
+		data->buffer = NULL;
 
 		data->bits = data->bytes * 8;
 		data->asTCP = false;
@@ -1410,7 +1416,6 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 			return false;
 		}
 
-		data->buffer = new char[PAD_NUMBER(data->bytes, 4)];
 	}
 	else
 	{
@@ -1443,15 +1448,32 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 	Assert ( (offset + length) <= data->bytes );
 	if ( length == 0 || ( offset + length > data->bytes ) )
 	{
-		delete[] data->buffer;
-		data->buffer = NULL;
 		ConMsg("Malformed fragment ofs %i len %d, buffer size %d from %s\n", offset, length, PAD_NUMBER(data->bytes, 4), remote_address.ToString() );
 		return false;
 	}
 
-	buf.ReadBytes( data->buffer + offset, length ); // read data
+	// Do not commit a fragment or replace the previous transfer on a short packet.
+	if ( buf.IsOverflowed() || buf.GetNumBitsLeft() < (int)( length * 8 ) )
+		return false;
+
+	if ( offset == 0 )
+		data->buffer = new char[PAD_NUMBER(data->bytes, 4)];
+
+	if ( !buf.ReadBytes( data->buffer + offset, length ) )
+	{
+		if ( offset == 0 )
+			delete [] data->buffer;
+		return false;
+	}
+
+	if ( pOldBuffer )
+	{
+		delete [] pOldBuffer;
+		ConDMsg( "Fragment transmission aborted at %i/%i from %s.\n", pReceiveData->ackedFragments, pReceiveData->numFragments, GetAddress() );
+	}
 
 	data->ackedFragments+= numFragments;
+	*pReceiveData = incoming;
 
 	if ( net_showfragments.GetBool() )
 		ConMsg("Received fragments: start %i, num %i\n", startFragment, numFragments );
@@ -1920,11 +1942,12 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 			
 			int nMsgStartBit = buf.GetNumBitsRead();
 
-			if ( !netmsg->ReadFromBuffer( buf ) )
+			if ( !netmsg->ReadFromBuffer( buf ) || buf.IsOverflowed() )
 			{
 				Log_Msg(LOG_NETCHAN, "Netchannel: failed reading message %s from %s.\n", msgname, remote_address.ToString() );
 				Assert ( 0 );
-				continue;
+				// The remaining payload has no reliable message boundary after a failed read.
+				return false;
 			}
 
 			UpdateMessageStats( netmsg->GetGroup(), buf.GetNumBitsRead() - nMsgStartBit );
@@ -2191,9 +2214,9 @@ bool CNetChan::CheckReceivingList(int nList)
 	if ( net_showfragments.GetBool() )
 		Log_Msg(LOG_NETCHAN, "Receiving complete: %i fragments, %i bytes\n", data->numFragments, data->bytes );
 
-	if ( data->isCompressed )
+	if ( data->isCompressed && !UncompressFragments( data ) )
 	{
-		UncompressFragments( data );
+		return false;
 	}
 
 	if ( !data->filename[0] )
@@ -2456,6 +2479,9 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 					return; // error while reading fragments, drop whole packet
 			}
 		}
+
+		if ( msg.IsOverflowed() )
+			return;
 
 		// flip subChannel bit to signal successful receiving
 		FLIPBIT(m_nInReliableState, bit);

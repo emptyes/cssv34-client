@@ -183,6 +183,7 @@ ConVar	password	( "password", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FC
 ConVar  cl_interpolate( "cl_interpolate", "1", FCVAR_USERINFO /* | FCVAR_DEVELOPMENTONLY | FCVAR_NOT_CONNECTED*/, "Interpolate entities on the client.");
 ConVar  cl_clanid( "cl_clanid", "0", FCVAR_ARCHIVE | FCVAR_USERINFO | FCVAR_HIDDEN, "Current clan ID for name decoration", CL_ClanIdChanged );
 ConVar  cl_show_connectionless_packet_warnings( "cl_show_connectionless_packet_warnings", "0", FCVAR_NONE, "Show console messages about ignored connectionless packets on the client." );
+static ConVar cl_query_trace( "cl_query_trace", "0", FCVAR_NONE, "Log server cvar query responses without variable values." );
 
 // ---------------------------------------------------------------------------------------- //
 // C_ServerClassInfo implementation.
@@ -255,9 +256,15 @@ static inline void CL_ParseDeltaHeader( CEntityReadInfo &u )
 #endif
 	SyncTag_Read( u.m_pBuf, "Hdr" );	
 
-	u.m_nNewEntity = u.m_nHeaderBase + 1 + u.m_pBuf->ReadUBitVar();
+	unsigned int delta = u.m_pBuf->ReadUBitVar();
+	if ( u.m_pBuf->IsOverflowed() || u.m_nHeaderBase < -1 || u.m_nHeaderBase >= MAX_EDICTS - 1 ||
+		delta >= (unsigned int)( MAX_EDICTS - u.m_nHeaderBase - 1 ) )
+	{
+		Host_Error( "CL_ParseDeltaHeader: invalid entity index\n" );
+		return;
+	}
 
-
+	u.m_nNewEntity = u.m_nHeaderBase + 1 + (int)delta;
 	u.m_nHeaderBase = u.m_nNewEntity;
 
 	// leave pvs flag
@@ -278,6 +285,11 @@ static inline void CL_ParseDeltaHeader( CEntityReadInfo &u )
 		{
 			u.m_UpdateFlags |= FHDR_DELETE;
 		}
+	}
+	if ( u.m_pBuf->IsOverflowed() )
+	{
+		Host_Error( "CL_ParseDeltaHeader: incomplete entity flags\n" );
+		return;
 	}
 	// Output the bitstream...
 #ifdef DEBUG_NETWORKING
@@ -935,6 +947,9 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 							break;
 	
 	case A2A_PRINT:			{
+								// Read the text first: 'string' is uninitialized until then.
+								msg.ReadString(string, sizeof(string));
+
 								if (strstr(string, "Banned by server") != 0)
 								{
 									COM_ExplainDisconnection(true, "Banned by server");
@@ -943,7 +958,6 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 								}
 								if (cl_allow_remote_print.GetBool())
 								{
-									msg.ReadString(string, sizeof(string));
 									ConMsg("%s\n", string);
 								}
 							}
@@ -1309,9 +1323,13 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 #endif
 
 	COM_TimestampedLog( " CBaseClient::ProcessCreateStringTable(%s)", msg->m_szTableName );
+	if ( !m_StringTableContainer )
+		return false;
+
 	m_StringTableContainer->AllowCreation( true );
 
     int startbit = msg->m_DataIn.GetNumBitsRead();
+	bool bValidUpdate = true;
 
 #ifndef SHARED_NET_STRING_TABLES
 
@@ -1319,6 +1337,11 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 		m_StringTableContainer->CreateStringTableEx( msg->m_szTableName, msg->m_nMaxEntries, msg->m_nUserDataSize, msg->m_nUserDataSizeBits, msg->m_bIsFilenames );
 
 	Assert ( table );
+	if ( !table )
+	{
+		m_StringTableContainer->AllowCreation( false );
+		return false;
+	}
 
 	table->SetTick( GetServerTickCount() ); // set creation tick
 
@@ -1333,8 +1356,8 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 		//              resource-usage limits at this level is a lost cause without a massive overhaul, but clamp these
 		//              to somewhat reasonable ranges to prevent overflows with less-audited code in the engine.
 		bool bSuccess = false;
-		if ( msg->m_DataIn.TotalBytesAvailable() > 0 &&
-		     msgCompressedSize <= (unsigned int)msg->m_DataIn.TotalBytesAvailable() &&
+		if ( !msg->m_DataIn.IsOverflowed() &&
+		     msgCompressedSize <= (unsigned int)( msg->m_DataIn.GetNumBitsLeft() / 8 ) &&
 		     msgCompressedSize < UINT_MAX/2 &&
 		     msgUncompressedSize < UINT_MAX/2 )
 		{
@@ -1352,12 +1375,14 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 			{
 				bf_read data( uncompressedBuffer, uncompressedSize );
 				table->ParseUpdate( data, msg->m_nNumEntries );
+				bSuccess = !data.IsOverflowed();
 			}
 
 			delete[] uncompressedBuffer;
 			delete[] compressedBuffer;
 		}
 
+		bValidUpdate = bSuccess;
 		if ( !bSuccess )
 		{
 			Assert( false );
@@ -1377,7 +1402,8 @@ bool CBaseClientState::ProcessCreateStringTable( SVC_CreateStringTable *msg )
 
 	COM_TimestampedLog( " CBaseClient::ProcessCreateStringTable(%s)-done", msg->m_szTableName );
 
-	return ( endbit - startbit ) == msg->m_nLength;	
+	return bValidUpdate && !msg->m_DataIn.IsOverflowed() &&
+		( endbit - startbit ) == msg->m_nLength;
 }
 
 bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
@@ -1395,6 +1421,9 @@ bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
 		CNetworkStringTable *table = (CNetworkStringTable*)
 			m_StringTableContainer->GetTable( msg->m_nTableID );
 
+		if ( !table )
+			return false;
+
 		table->ParseUpdate( msg->m_DataIn, msg->m_nChangedEntries );
 	}
 	else
@@ -1406,7 +1435,7 @@ bool CBaseClientState::ProcessUpdateStringTable( SVC_UpdateStringTable *msg )
 
 	int endbit = msg->m_DataIn.GetNumBitsRead();
 
-	return ( endbit - startbit ) == msg->m_nLength;
+	return !msg->m_DataIn.IsOverflowed() && ( endbit - startbit ) == msg->m_nLength;
 }
 
 
@@ -1749,19 +1778,25 @@ bool CBaseClientState::ProcessGetCvarValue( SVC_GetCvarValue *msg )
 
 	char tempValue[256];
 
+	// Cvar query diagnostics are noisy and may expose cvar values, so they stay
+	// behind cl_query_trace (same gate as the send-side trace below).
+	const bool bTraceCvar = cl_query_trace.GetBool();
+
 	// Does any ConCommand exist with this name?
 	const ConVar *pVar = g_pCVar->FindVar( msg->m_szCvarName );
 	if ( pVar )
 	{
 		if ( pVar->IsFlagSet( FCVAR_HIDDEN_FROM_SERVER ) )
 		{
-			Msg("[GetCvarValue] %s (%d): hidden from server, not sending\n", msg->m_szCvarName, msg->m_iCookie);
+			if ( bTraceCvar )
+				Msg("[GetCvarValue] %s (%d): hidden from server, not sending\n", msg->m_szCvarName, msg->m_iCookie);
 			// This cvar is hidden from server.
 			returnMsg.m_eStatusCode = eQueryCvarValueStatus_CvarNotFound;
 		}
 		else if ( pVar->IsFlagSet( FCVAR_SERVER_CANNOT_QUERY ) )
 		{
-			Msg("[GetCvarValue] %s (%d): protected, not sending\n", msg->m_szCvarName, msg->m_iCookie);
+			if ( bTraceCvar )
+				Msg("[GetCvarValue] %s (%d): protected, not sending\n", msg->m_szCvarName, msg->m_iCookie);
 			// The server isn't allowed to query this.
 			returnMsg.m_eStatusCode = eQueryCvarValueStatus_CvarProtected;
 		}
@@ -1781,24 +1816,28 @@ bool CBaseClientState::ProcessGetCvarValue( SVC_GetCvarValue *msg )
 					Q_snprintf( tempValue, sizeof( tempValue ), "%f", pVar->GetFloat() );
 				}
 				returnMsg.m_szCvarValue = tempValue;
-				Msg("[GetCvarValue] %s (%d): value intact: %s (not as string)\n", msg->m_szCvarName, msg->m_iCookie, tempValue);
+				if ( bTraceCvar )
+					Msg("[GetCvarValue] %s (%d): value intact: %s (not as string)\n", msg->m_szCvarName, msg->m_iCookie, tempValue);
 			}
 			else
 			{
 				// The easy case..
 				returnMsg.m_szCvarValue = pVar->GetString();
-				Msg("[GetCvarValue] %s (%d): value intact: %s (as string)\n", msg->m_szCvarName, msg->m_iCookie, pVar->GetString());
+				if ( bTraceCvar )
+					Msg("[GetCvarValue] %s (%d): value intact: %s (as string)\n", msg->m_szCvarName, msg->m_iCookie, pVar->GetString());
 			}
 		}				
 	}
 	else
 	{
 		if ( g_pCVar->FindCommand( msg->m_szCvarName ) ) {
-			Msg("[GetCvarValue] %s (%d): not a cvar\n", msg->m_szCvarName, msg->m_iCookie);
+			if ( bTraceCvar )
+				Msg("[GetCvarValue] %s (%d): not a cvar\n", msg->m_szCvarName, msg->m_iCookie);
 			returnMsg.m_eStatusCode = eQueryCvarValueStatus_NotACvar; // It's a command, not a cvar.
 		}
 		else {
-			Msg("[GetCvarValue] %s (%d): not found\n", msg->m_szCvarName, msg->m_iCookie);
+			if ( bTraceCvar )
+				Msg("[GetCvarValue] %s (%d): not found\n", msg->m_szCvarName, msg->m_iCookie);
 			returnMsg.m_eStatusCode = eQueryCvarValueStatus_CvarNotFound;
 		}
 	}
@@ -1806,11 +1845,17 @@ bool CBaseClientState::ProcessGetCvarValue( SVC_GetCvarValue *msg )
 	g_pClientModManager->FillRespondCvarValue(msg, returnMsg);
 
 	// Send back.
-	Msg("[GetCvarValue] %s (%d): sending back response\n", msg->m_szCvarName, msg->m_iCookie);
-	if (!m_NetChannel->SendNetMsg(returnMsg))
+	const bool queued = m_NetChannel->SendNetMsg( returnMsg );
+	if ( cl_query_trace.GetBool() )
 	{
-		Warning("Failed to send CLC_RespondCvarValue\n");
-		return false;
+		Msg( "Cvar query: cookie=%d name=%s status=%d queued=%d playback=%d\n",
+			returnMsg.m_iCookie, returnMsg.m_szCvarName, static_cast<int>( returnMsg.m_eStatusCode ),
+			queued ? 1 : 0, m_NetChannel->IsPlayback() ? 1 : 0 );
+	}
+	if ( !queued )
+	{
+		Warning( "Failed to queue cvar query response: cookie=%d name=%s\n",
+			returnMsg.m_iCookie, returnMsg.m_szCvarName );
 	}
 	return true;
 }

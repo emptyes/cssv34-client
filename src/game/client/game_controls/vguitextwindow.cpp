@@ -314,13 +314,56 @@ void CTextWindow::Update( void )
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Map the server-provided exit command to a known safe command.
+// The "cmd" key comes from a server network message, so it must never be
+// executed as-is (that allowed servers to run arbitrary commands on the client).
+// Accepts both the old v34 string form ("joingame") and the TEXTWINDOW_CMD_* number.
+//-----------------------------------------------------------------------------
+static const char *GetSafeTextWindowExitCommand( const char *pszCommand )
+{
+	static const char *s_pszAllowed[] =
+	{
+		NULL,				// TEXTWINDOW_CMD_NONE
+		"joingame",			// TEXTWINDOW_CMD_JOINGAME
+		"changeteam",		// TEXTWINDOW_CMD_CHANGETEAM
+		"impulse 101",		// TEXTWINDOW_CMD_IMPULSE101
+		"mapinfo",			// TEXTWINDOW_CMD_MAPINFO
+		"closed_htmlpage",	// TEXTWINDOW_CMD_CLOSED_HTMLPAGE
+		"chooseteam",		// TEXTWINDOW_CMD_CHOOSETEAM
+	};
+
+	if ( !pszCommand || !pszCommand[0] )
+		return NULL;
+
+	// Numeric form (TEXTWINDOW_CMD_* sent as int)
+	if ( pszCommand[0] >= '0' && pszCommand[0] <= '9' && pszCommand[1] == '\0' )
+	{
+		int nIndex = pszCommand[0] - '0';
+		if ( nIndex < (int)ARRAYSIZE( s_pszAllowed ) )
+			return s_pszAllowed[nIndex];
+		return NULL;
+	}
+
+	// String form (old v34 servers)
+	for ( int i = 1; i < (int)ARRAYSIZE( s_pszAllowed ); i++ )
+	{
+		if ( !Q_stricmp( pszCommand, s_pszAllowed[i] ) )
+			return s_pszAllowed[i];
+	}
+
+	DevMsg( "CTextWindow::OnCommand: blocked unknown exit command \"%s\"\n", pszCommand );
+	return NULL;
+}
+
 void CTextWindow::OnCommand( const char *command )
 {
 	if (!Q_strcmp(command, "okay"))
 	{
-		if (m_szExitCommand[0] != 0 )
+		const char *pszCommand = GetSafeTextWindowExitCommand( m_szExitCommand );
+		if ( pszCommand )
 		{
-			engine->ClientCmd_Unrestricted(m_szExitCommand);
+			engine->ClientCmd_Unrestricted( pszCommand );
 		}
 		m_pViewPort->ShowPanel( this, false );
 	}

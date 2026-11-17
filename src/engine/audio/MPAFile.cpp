@@ -108,52 +108,60 @@ m_pBuffer(NULL), m_dwBufferSize(0), m_dwBegin( dwFileOffset ), m_dwEnd(0),
 m_dwNumTimesRead(0), m_bVBRFile( false ), m_pVBRHeader(NULL), m_bMustReleaseFile( false ),
 m_pMPAHeader(NULL), m_hFile( hFile ), m_szFile(NULL), m_dwFrameNo(1)
 {
-    // open file, if not already done
-    if( m_hFile == FILESYSTEM_INVALID_HANDLE )
+    try
     {
-        Open( szFile );
-        m_bMustReleaseFile = true;
-    }
-    // save filename
-    m_szFile = strdup( szFile );
-    
-    // set end of MPEG data (assume file end)
-    if( m_dwEnd <= 0 )
-    {
-        // get file size
-        m_dwEnd = g_pFullFileSystem->Size( m_hFile );
-    }
-
-    // find first valid MPEG frame
-    m_pMPAHeader = new CMPAHeader( this );
-
-    // is VBR header available?
-    CVBRHeader::VBRHeaderType HeaderType = CVBRHeader::NoHeader;
-    uint32 dwOffset = m_pMPAHeader->m_dwSyncOffset;
-    if( CVBRHeader::IsVBRHeaderAvailable( this, HeaderType, dwOffset ) )
-    {
-        try
+        // open file, if not already done
+        if( m_hFile == FILESYSTEM_INVALID_HANDLE )
         {
-            // read out VBR header
-            m_pVBRHeader = new CVBRHeader( this, HeaderType, dwOffset );
-            
-            m_bVBRFile = true;
-            m_dwBytesPerSec = m_pVBRHeader->m_dwBytesPerSec;
-            if( m_pVBRHeader->m_dwBytes > 0 )
-                m_dwEnd = m_dwBegin + m_pVBRHeader->m_dwBytes;
+            Open( szFile );
+            m_bMustReleaseFile = true;
+        }
+        // save filename
+        m_szFile = strdup( szFile );
+
+        // set end of MPEG data (assume file end)
+        if( m_dwEnd <= 0 )
+        {
+            // get file size
+            m_dwEnd = g_pFullFileSystem->Size( m_hFile );
         }
 
-        catch(CMPAException& Exc)
+        // find first valid MPEG frame
+        m_pMPAHeader = new CMPAHeader( this );
+
+        // is VBR header available?
+        CVBRHeader::VBRHeaderType HeaderType = CVBRHeader::NoHeader;
+        uint32 dwOffset = m_pMPAHeader->m_dwSyncOffset;
+        if( CVBRHeader::IsVBRHeaderAvailable( this, HeaderType, dwOffset ) )
         {
-            Exc.ShowError();
-        }   
+            try
+            {
+                // read out VBR header
+                m_pVBRHeader = new CVBRHeader( this, HeaderType, dwOffset );
+
+                m_bVBRFile = true;
+                m_dwBytesPerSec = m_pVBRHeader->m_dwBytesPerSec;
+                if( m_pVBRHeader->m_dwBytes > 0 )
+                    m_dwEnd = m_dwBegin + m_pVBRHeader->m_dwBytes;
+            }
+
+            catch(CMPAException& Exc)
+            {
+                Exc.ShowError();
+            }
+        }
+
+        if( !m_pVBRHeader )
+        {
+            // always skip empty (32kBit) frames
+            m_bVBRFile = m_pMPAHeader->SkipEmptyFrames();
+            m_dwBytesPerSec = m_pMPAHeader->GetBytesPerSecond();
+        }
     }
-    
-    if( !m_pVBRHeader )
+    catch( ... )
     {
-        // always skip empty (32kBit) frames
-        m_bVBRFile = m_pMPAHeader->SkipEmptyFrames();
-        m_dwBytesPerSec = m_pMPAHeader->GetBytesPerSecond();    
+        Close();
+        throw;
     }
 }
 
@@ -238,6 +246,11 @@ bool CMPAFile::GetLastFrame()
 // destructor
 CMPAFile::~CMPAFile(void)
 {
+    Close();
+}
+
+void CMPAFile::Close()
+{
     delete m_pMPAHeader;
     
     if( m_pVBRHeader )
@@ -289,12 +302,18 @@ uint32 CMPAFile::Read( void *pData, uint32 dwSize, uint32 dwOffset )
 {
     uint32 dwBytesRead = 0;
     
+    if( m_dwBegin > 0x7fffffffu || dwOffset > 0x7fffffffu - m_dwBegin || dwSize > 0x7fffffffu )
+        throw CMPAException( CMPAException::ErrReadFile, m_szFile );
+
     // set position first
     SetPosition( m_dwBegin+dwOffset );
 
     //if( !::ReadFile( m_hFile, pData, dwSize, &dwBytesRead, NULL ) )
     //  throw CMPAException( CMPAException::ErrReadFile, m_szFile, _T("ReadFile"), true );
-    dwBytesRead = g_pFullFileSystem->Read( pData, dwSize, m_hFile );
+    const int nBytesRead = g_pFullFileSystem->Read( pData, dwSize, m_hFile );
+    if( nBytesRead < 0 || (uint32)nBytesRead > dwSize )
+        throw CMPAException( CMPAException::ErrReadFile, m_szFile );
+    dwBytesRead = (uint32)nBytesRead;
 
     return dwBytesRead;
 }
@@ -302,12 +321,19 @@ uint32 CMPAFile::Read( void *pData, uint32 dwSize, uint32 dwOffset )
 // convert from big endian to native format (Intel=little endian) and return as uint32 (32bit)
 uint32 CMPAFile::ExtractBytes( uint32& dwOffset, uint32 dwNumBytes, bool bMoveOffset )
 {   
+    if( dwNumBytes == 0 || dwNumBytes > 4 || dwOffset > 0xffffffffu - dwNumBytes )
+        throw CMPAException( CMPAException::EndOfBuffer, m_szFile );
+
     Assert( dwNumBytes > 0 );
     Assert( dwNumBytes <= 4 );  // max 4 byte
 
     // enough bytes in buffer, otherwise read from file
-    if( !m_pBuffer || ( ((int)(m_dwBufferSize - dwOffset)) < (int)dwNumBytes) )
+    if( !m_pBuffer || dwOffset > m_dwBufferSize || dwNumBytes > m_dwBufferSize - dwOffset )
         FillBuffer( dwOffset + dwNumBytes );
+
+    // A short read must never expose the unfilled part of the allocation.
+    if( !m_pBuffer || dwOffset > m_dwBufferSize || dwNumBytes > m_dwBufferSize - dwOffset )
+        throw CMPAException( CMPAException::EndOfBuffer, m_szFile );
 
     uint32 dwResult = 0;
 
@@ -316,7 +342,7 @@ uint32 CMPAFile::ExtractBytes( uint32& dwOffset, uint32 dwNumBytes, bool bMoveOf
 
     for( uint32 n=dwOffset; n < dwOffset+dwNumBytes; n++ )
     {
-        dwResult |= ((byte)m_pBuffer[n]) << (8*dwNumByteShifts); // the bit shift will do the correct byte order for you                                                           
+        dwResult |= ((uint32)(byte)m_pBuffer[n]) << (8*dwNumByteShifts); // the bit shift will do the correct byte order for you
 		dwNumByteShifts--;
     }
     
@@ -329,8 +355,17 @@ uint32 CMPAFile::ExtractBytes( uint32& dwOffset, uint32 dwNumBytes, bool bMoveOf
 // throws exception if not possible
 void CMPAFile::FillBuffer( uint32 dwOffsetToRead )
 {
+    const uint32 dwFileSize = g_pFullFileSystem->Size( m_hFile );
+    if( m_dwBegin > dwFileSize || m_dwBegin > 0x7fffffffu )
+        throw CMPAException( CMPAException::EndOfBuffer, m_szFile );
+    uint32 dwAvailable = dwFileSize - m_dwBegin;
+    if( dwAvailable > 0x7fffffffu - m_dwBegin )
+        dwAvailable = 0x7fffffffu - m_dwBegin;
+    if( dwOffsetToRead > dwAvailable || m_dwBufferSize > dwAvailable )
+        throw CMPAException( CMPAException::EndOfBuffer, m_szFile );
+
     uint32 dwNewBufferSize;
-    
+
     // calc new buffer size
     if( m_dwBufferSize == 0 )
         dwNewBufferSize = m_dwInitBufferSize;
@@ -341,6 +376,10 @@ void CMPAFile::FillBuffer( uint32 dwOffsetToRead )
     if( dwNewBufferSize < dwOffsetToRead )
         dwNewBufferSize = dwOffsetToRead;
     
+    // Do not prefetch or allocate beyond the physical file/Seek range.
+    if( dwNewBufferSize > dwAvailable )
+        dwNewBufferSize = dwAvailable;
+
     // reserve new buffer
     BYTE* pNewBuffer = new BYTE[dwNewBufferSize];
     

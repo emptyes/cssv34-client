@@ -88,6 +88,7 @@ public:
 	bool GetLastFrame();
 
 private:
+	void Close();
 	static const uint32 m_dwInitBufferSize;
 
 	// methods for file access
