@@ -277,7 +277,7 @@ CMPAHeader::HeaderError CMPAHeader::IsSync( uint32 dwOffset,  bool bExtended  )
 				catch( CMPAException& Exc )
 				{
 					// could not find any subsequent frame, assume it is the last frame
-					if( Exc.GetErrorID() == CMPAException::NoFrame )
+					if( Exc.GetErrorID() == CMPAException::NoFrame || Exc.GetErrorID() == CMPAException::EndOfBuffer )
 					{
 						if( dwOffset + m_pMPAFile->m_dwBegin > m_pMPAFile->m_dwEnd )
 							m_dwRealFrameSize = m_pMPAFile->m_dwEnd - m_pMPAFile->m_dwBegin - m_dwSyncOffset;

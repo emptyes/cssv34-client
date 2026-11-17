@@ -41,6 +41,7 @@ damage. */
 #include "ivoicecodec.h"
 #include "VoiceEncoder_Speex.h"
 #include <stdio.h>
+#include <string.h>
 #include <tier0/dbg.h>
 
 #define SAMPLERATE			8000	// get 8000 samples/sec
@@ -78,6 +79,7 @@ VoiceEncoder_Speex::VoiceEncoder_Speex()
 	m_EncoderState = NULL;
 	m_DecoderState = NULL;
 	m_Quality = 0;
+	m_bBitsInitialized = false;
 }
 
 VoiceEncoder_Speex::~VoiceEncoder_Speex()
@@ -157,7 +159,11 @@ void VoiceEncoder_Speex::DecodeFrame(const char *pCompressed, char *pDecompresse
 	speex_bits_read_from(&m_Bits, (char *)pCompressed, ENCODED_FRAME_SIZE[m_Quality] );
 
 	/*Decode the data*/
-	speex_decode(m_DecoderState, &m_Bits, output);
+	if ( speex_decode(m_DecoderState, &m_Bits, output) != 0 )
+	{
+		memset( pDecompressedBytes, 0, RAW_FRAME_SIZE * BYTES_PER_SAMPLE );
+		return;
+	}
 	
 	/*Copy from float to short (16 bits) for output*/
 	for (int i=0;i<RAW_FRAME_SIZE;i++)
@@ -169,6 +175,9 @@ void VoiceEncoder_Speex::DecodeFrame(const char *pCompressed, char *pDecompresse
 
 bool VoiceEncoder_Speex::ResetState()
 {
+	if ( !m_EncoderState || !m_DecoderState )
+		return false;
+
 	speex_encoder_ctl(m_EncoderState, SPEEX_RESET_STATE , NULL );
 	speex_decoder_ctl(m_DecoderState, SPEEX_RESET_STATE , NULL );
 	return true;
@@ -176,13 +185,24 @@ bool VoiceEncoder_Speex::ResetState()
 
 bool VoiceEncoder_Speex::InitStates()
 {
+	// Reinitialization must release the previous codec and bit buffer.
+	TermStates();
 	speex_bits_init(&m_Bits);
+	if ( !m_Bits.chars )
+		return false;
+	m_bBitsInitialized = true;
 	
 	m_EncoderState = speex_encoder_init( &speex_nb_mode );	// narrow band mode 8kbp
 
 	m_DecoderState = speex_decoder_init( &speex_nb_mode );
 	
-	return m_EncoderState && m_DecoderState;
+	if ( !m_EncoderState || !m_DecoderState )
+	{
+		TermStates();
+		return false;
+	}
+
+	return true;
 }
 
 void VoiceEncoder_Speex::TermStates()
@@ -199,5 +219,9 @@ void VoiceEncoder_Speex::TermStates()
 		m_DecoderState = NULL;
 	}
 
-	speex_bits_destroy( &m_Bits );
+	if ( m_bBitsInitialized )
+	{
+		speex_bits_destroy( &m_Bits );
+		m_bBitsInitialized = false;
+	}
 }

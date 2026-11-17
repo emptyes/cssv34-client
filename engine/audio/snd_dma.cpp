@@ -193,7 +193,7 @@ void CActiveChannels::Remove( channel_t *pChannel )
 }
 
 
-void CActiveChannels::GetActiveChannels( CChannelList &list )
+void CActiveChannels::GetActiveChannels( CChannelList &list, bool bCollectDSPs )
 {
 	list.m_count = m_count;
 	if ( m_count )
@@ -201,15 +201,19 @@ void CActiveChannels::GetActiveChannels( CChannelList &list )
 		Q_memcpy( list.m_list, m_list, sizeof(m_list[0])*m_count );
 	}
 
-	for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+	if ( bCollectDSPs )
 	{
-		paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
-		if ( pSpecialBuffer->nSpecialDSP != 0 )
+		for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
 		{
-			list.m_nSpecialDSPs.AddToTail( pSpecialBuffer->nSpecialDSP );
+			paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+			if ( pSpecialBuffer->nSpecialDSP != 0 )
+			{
+				list.m_nSpecialDSPs.AddToTail( pSpecialBuffer->nSpecialDSP );
+			}
 		}
 	}
 
+	list.m_hasDynamicSourceChannels = true;
 	list.m_hasSpeakerChannels = true;
 	list.m_has11kChannels = true;
 	list.m_has22kChannels = true;
@@ -5752,19 +5756,22 @@ void S_StopSound(int soundsource, int entchannel)
 	}
 }
 
-channel_t *S_FindChannelByGuid( int guid )
+channel_t *CActiveChannels::FindByGuid( int guid )
 {
-	CChannelList list;
-	g_ActiveChannels.GetActiveChannels( list );
-	for ( int i = 0; i < list.Count(); i++ )
+	for ( int i = 0; i < m_count; ++i )
 	{
-		channel_t *pChannel = list.GetChannel(i);
+		channel_t *pChannel = &channels[m_list[i]];
 		if ( pChannel->guid == guid )
 		{
 			return pChannel;
 		}
 	}
 	return NULL;
+}
+
+channel_t *S_FindChannelByGuid( int guid )
+{
+	return g_ActiveChannels.FindByGuid( guid );
 }
 
 //-----------------------------------------------------------------------------
@@ -5788,8 +5795,9 @@ void S_StopSoundByGuid( int guid )
 //-----------------------------------------------------------------------------
 float S_SoundDurationByGuid( int guid )
 {
+	THREAD_LOCK_SOUND();
 	channel_t *pChannel = S_FindChannelByGuid( guid );
-	if ( !pChannel || !pChannel->sfx )
+	if ( !pChannel || !pChannel->sfx || !pChannel->sfx->pSource )
 		return 0.0f;
 
 	// NOTE: Looping sounds will return the length of a single loop
@@ -5805,8 +5813,9 @@ float S_SoundDurationByGuid( int guid )
 //-----------------------------------------------------------------------------
 bool S_IsLoopingSoundByGuid( int guid )
 {
+	THREAD_LOCK_SOUND();
 	channel_t *pChannel = S_FindChannelByGuid( guid );
-	if ( !pChannel || !pChannel->sfx )
+	if ( !pChannel || !pChannel->sfx || !pChannel->sfx->pSource )
 		return false;
 
 	return( pChannel->sfx->pSource->IsLooped() );
@@ -5830,6 +5839,7 @@ int S_GetGuidForLastSoundEmitted()
 //-----------------------------------------------------------------------------
 bool S_IsSoundStillPlaying( int guid )
 {
+	THREAD_LOCK_SOUND();
 	channel_t *pChannel = S_FindChannelByGuid( guid );
 	return pChannel != NULL ? true : false;
 }
@@ -5856,6 +5866,7 @@ void S_SetVolumeByGuid( int guid, float fvol )
 //-----------------------------------------------------------------------------
 float S_GetElapsedTimeByGuid( int guid )
 {
+	THREAD_LOCK_SOUND();
 	channel_t *pChannel = S_FindChannelByGuid( guid );
 	if ( !pChannel )
 		return 0.0f;
@@ -5864,8 +5875,12 @@ float S_GetElapsedTimeByGuid( int guid )
 	if ( !mixer )
 		return 0.0f;
 
-	float elapsed = mixer->GetSamplePosition() / ( mixer->GetSource()->SampleRate() * pChannel->pitch * 0.01f );
-	return elapsed;
+	CAudioSource *pSource = mixer->GetSource();
+	if ( !pSource )
+		return 0.0f;
+
+	float flRate = pSource->SampleRate() * pChannel->pitch * 0.01f;
+	return ( flRate != 0.0f ) ? mixer->GetSamplePosition() / flRate : 0.0f;
 }
 
 //-----------------------------------------------------------------------------

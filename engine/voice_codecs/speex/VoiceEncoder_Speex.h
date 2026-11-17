@@ -70,6 +70,7 @@ private:
 	void *		m_EncoderState;	// speex internal encoder state
 	void *		m_DecoderState; // speex internal decoder state
 
+	bool		m_bBitsInitialized;
 	SpeexBits	m_Bits;	// helpful bit buffer structure
 };
 

@@ -472,6 +472,14 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 	if ( sampleCount <= 0 )
 		return;
 
+	// The prepared list flags are conservative: removals may leave them true.
+	// Skip only an absent source rate; upsampling/filter history still runs.
+	if ( !list.m_hasDynamicSourceChannels &&
+		 ( ( rate == SOUND_11k && !list.m_has11kChannels ) ||
+		   ( rate == SOUND_22k && !list.m_has22kChannels ) ||
+		   ( rate == SOUND_44k && !list.m_has44kChannels ) ) )
+		return;
+
 	// Apply a global pitch shift if we're playing back a time-scaled replay
 	float flGlobalPitchScale = 1.0f;
 
@@ -2055,13 +2063,15 @@ ConVar snd_mute_losefocus("snd_mute_losefocus", "1", FCVAR_ARCHIVE);
 void MIX_BuildChannelList( CChannelList &list )
 {
 	VPROF("MIX_BuildChannelList");
-	g_ActiveChannels.GetActiveChannels( list );
+	// DSPs are rebuilt below from channels that survive filtering.
+	g_ActiveChannels.GetActiveChannels( list, false );
 	list.m_nSpecialDSPs.RemoveAll();
 	list.m_hasDryChannels = false;
 	list.m_hasSpeakerChannels = false;
 	list.m_has11kChannels = false;
 	list.m_has22kChannels = false;
 	list.m_has44kChannels = false;
+	list.m_hasDynamicSourceChannels = false;
 	bool delayStartServer = false;
 	bool delayStartClient = false;
 	bool bPaused = g_pSoundServices->IsGamePaused();
@@ -2175,6 +2185,10 @@ void MIX_BuildChannelList( CChannelList &list )
 			list.m_hasDryChannels = true;
 		}
 		int rate = pSource->SampleRate();
+		// Dynamic sources must retain the legacy per-pass rate checks.
+		if ( ch->flags.isSentence || pSource->IsVoiceSource() ||
+			 ( rate != SOUND_11k && rate != SOUND_22k && rate != SOUND_44k ) )
+			list.m_hasDynamicSourceChannels = true;
 		if ( rate == SOUND_11k )
 		{
 			list.m_has11kChannels = true;

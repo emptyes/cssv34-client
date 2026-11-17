@@ -29,7 +29,16 @@ public:
 	uint32 GetBytesPerSecond() const { return m_dwBitrate / 8; };
 	// calc number of seconds from number of frames
 	uint32 GetLengthSecond(uint32 dwNumFrames) const { return dwNumFrames * m_dwSamplesPerFrame / m_dwSamplesPerSec; };
-	uint32 GetBytesPerSecond( uint32 dwNumFrames, uint32 dwNumBytes ) const { return dwNumBytes / GetLengthSecond( dwNumFrames ); };
+	uint32 GetBytesPerSecond( uint32 dwNumFrames, uint32 dwNumBytes ) const
+	{
+		const uint64 sampleCount = (uint64)dwNumFrames * m_dwSamplesPerFrame;
+		if ( !sampleCount || !m_dwSamplesPerSec )
+			return 0;
+
+		// Keep fractional seconds until the final integer byte-rate conversion.
+		const uint64 byteRate = (uint64)dwNumBytes * m_dwSamplesPerSec / sampleCount;
+		return byteRate <= 0xffffffffu ? (uint32)byteRate : 0;
+	}
 	bool IsMono() const { return (m_ChannelMode == SingleChannel)?true:false; };
 	// true if MPEG2/2.5 otherwise false
 	bool IsLSF() const { return m_bLSF;	};	

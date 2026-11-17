@@ -567,12 +567,10 @@ void CNetGraphPanel::DrawTimes( vrect_t vrect, cmdinfo_t *cmdinfo, int x, int w,
 //-----------------------------------------------------------------------------
 void CNetGraphPanel::GetFrameData( 	INetChannelInfo *netchannel, int *biggest_message, float *avg_message, float *f95thpercentile )
 {
-	float	frame_received_time;
-	// float	frame_latency;
-
 	*biggest_message	= 0;
 	*avg_message		= 0.0f;
-	*f95thpercentile	= 0.0f;
+	if ( f95thpercentile )
+		*f95thpercentile = 0.0f;
 
 	int msg_count = 0;
 
@@ -611,7 +609,6 @@ void CNetGraphPanel::GetFrameData( 	INetChannelInfo *netchannel, int *biggest_me
 	{
 		
 		
-		frame_received_time = netchannel->GetPacketTime( FLOW_INCOMING, seqnr );
 
 		netbandwidthgraph_t *nbwg = &m_Graph[ seqnr & ( TIMINGS - 1 )];
 		packet_latency_t *lat = &m_PacketLatency[ seqnr & ( TIMINGS - 1 ) ];
@@ -651,7 +648,11 @@ void CNetGraphPanel::GetFrameData( 	INetChannelInfo *netchannel, int *biggest_me
 	{
 		*avg_message /= msg_count;
 
-		int deviationsquared = 0;
+		// No warning threshold is needed for text-only graphs or one packet.
+		if ( !f95thpercentile || msg_count < 2 )
+			return;
+
+		double deviationsquared = 0.0;
 
 		// Compute std deviation
 		// Fill in frame data
@@ -661,7 +662,7 @@ void CNetGraphPanel::GetFrameData( 	INetChannelInfo *netchannel, int *biggest_me
 		{
 			int bytes = m_Graph[ seqnr & ( TIMINGS - 1 )].msgbytes[INetChannelInfo::TOTAL] - ( *avg_message );
 
-			deviationsquared += ( bytes * bytes );
+			deviationsquared += (double)bytes * bytes;
 		}
 
 		float var = ( float )( deviationsquared ) / (float)( msg_count - 1 );
@@ -1192,7 +1193,7 @@ void CNetGraphPanel::Paint()
 	if ( nci )
 	{
 		// update incoming data
-		GetFrameData( nci, &maxmsgbytes, &avg_message, &warning_threshold );
+		GetFrameData( nci, &maxmsgbytes, &avg_message, graphtype > 1 ? &warning_threshold : NULL );
 
 		// update outgoing data
 		GetCommandInfo( nci, m_Cmdinfo );

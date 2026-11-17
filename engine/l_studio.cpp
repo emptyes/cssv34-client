@@ -2806,7 +2806,20 @@ inline uintp StaticPropModelHash( const model_t *pModel )
 	return hash ^ ( hash >> 16 );
 }
 
-inline int FindModel( const CUtlVector<rmodel_t> &list, const model_t *pModel )
+template <class T, int nInlineSize>
+class CStaticPropModelMemory : public CUtlMemoryFixedGrowable<T, nInlineSize>
+{
+public:
+	CStaticPropModelMemory( int growSize = 0, int initSize = 0 ) : CUtlMemoryFixedGrowable<T, nInlineSize>( growSize )
+	{
+		// Large batches retain their direct reserve; small batches stay inline.
+		if ( initSize > nInlineSize )
+			CUtlMemory<T>::Init( growSize, initSize );
+	}
+};
+
+template <class TAllocator>
+inline int FindModel( const CUtlVector<rmodel_t, TAllocator> &list, const model_t *pModel )
 {
 	for ( int j = list.Count(); --j >= 0 ; )
 	{
@@ -2829,7 +2842,7 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 	CMatRenderContextPtr pRenderContext( materials );
 	const int nInitialCount = MAX( 0, count );
 	CUtlSortVector<robject_t, CRobjectLess> objectList( 0, MIN( nInitialCount, 1024 ) );
-	CUtlVector<rmodel_t> modelList( 0, MIN( nInitialCount, 256 ) );
+	CUtlVector<rmodel_t, CStaticPropModelMemory<rmodel_t, 32> > modelList( 0, MIN( nInitialCount, 256 ) );
 	CUtlVectorFixedGrowable<int, 128> modelLookup;
 	CUtlVector<short, CStaticPropTempMemory<short, 256> > lightObjects;
 	CUtlVector<short, CStaticPropTempMemory<short, 64> > shadowObjects;

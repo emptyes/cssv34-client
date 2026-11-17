@@ -57,30 +57,38 @@ bool CVBRHeader::IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& Header
 CVBRHeader::CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, uint32 dwOffset ) :
 	m_pMPAFile( pMPAFile ), m_pnToc(NULL), m_HeaderType( HeaderType ), m_dwOffset(dwOffset), m_dwFrames(0), m_dwBytes(0)
 {
-	switch( m_HeaderType )
+	try
 	{
-		case NoHeader:
-			// no Header found
-			throw CMPAException( CMPAException::NoVBRHeader, pMPAFile->GetFilename(), NULL, false );
-			break;
-		case XINGHeader:
-			if(	!ExtractXINGHeader( m_dwOffset ) )
+		switch( m_HeaderType )
+		{
+			case NoHeader:
+				// no Header found
 				throw CMPAException( CMPAException::NoVBRHeader, pMPAFile->GetFilename(), NULL, false );
-			break;
-		case VBRIHeader:
-			if( !ExtractVBRIHeader( m_dwOffset ) ) 
-				throw CMPAException( CMPAException::NoVBRHeader, pMPAFile->GetFilename(), NULL, false );
-			break;
+				break;
+			case XINGHeader:
+				if(	!ExtractXINGHeader( m_dwOffset ) )
+					throw CMPAException( CMPAException::NoVBRHeader, pMPAFile->GetFilename(), NULL, false );
+				break;
+			case VBRIHeader:
+				if( !ExtractVBRIHeader( m_dwOffset ) )
+					throw CMPAException( CMPAException::NoVBRHeader, pMPAFile->GetFilename(), NULL, false );
+				break;
+		}
+		// calc bitrate
+		if( m_dwBytes > 0 && m_dwFrames > 0 )
+		{
+			// calc number of seconds
+			m_dwBytesPerSec = m_pMPAFile->m_pMPAHeader->GetBytesPerSecond( m_dwFrames, m_dwBytes );
+		}
+		else	// incomplete header found
+		{
+			throw CMPAException( CMPAException::IncompleteVBRHeader, pMPAFile->GetFilename(), NULL, false );
+		}
 	}
-	// calc bitrate
-	if( m_dwBytes > 0 && m_dwFrames > 0 )
+	catch( ... )
 	{
-		// calc number of seconds
-		m_dwBytesPerSec = m_pMPAFile->m_pMPAHeader->GetBytesPerSecond( m_dwFrames, m_dwBytes );
-	}
-	else	// incomplete header found
-	{
-		throw CMPAException( CMPAException::IncompleteVBRHeader, pMPAFile->GetFilename(), NULL, false );
+		delete[] m_pnToc;
+		throw;
 	}
 }
 
@@ -91,10 +99,10 @@ bool CVBRHeader::CheckID( CMPAFile* pMPAFile, char ch0, char ch1, char ch2, char
 
 bool CVBRHeader::CheckXING( CMPAFile* pMPAFile, uint32& dwOffset )
 {
-	// XING ID found?
-	if( !CheckID( pMPAFile, 'X', 'i', 'n', 'g', dwOffset) && !CheckID( pMPAFile, 'I', 'n', 'f', 'o', dwOffset) )
-		return false;
-	return true;
+	// Read either ID at the same position; ExtractBytes advances dwOffset.
+	const uint32 dwID = pMPAFile->ExtractBytes( dwOffset, 4 );
+	return dwID == MAKEFOURCC( 'g', 'n', 'i', 'X' ) ||
+		dwID == MAKEFOURCC( 'o', 'f', 'n', 'I' );
 }
 
 bool CVBRHeader::CheckVBRI( CMPAFile* pMPAFile, uint32& dwOffset )

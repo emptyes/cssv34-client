@@ -381,6 +381,8 @@ bool CAudioMixerWaveADPCM::DecodeBlock( void )
 				return false;
 			memcpy( tmpBlock + total, pData, available );
 			total += available;
+			if ( total == blockSize )
+				break;
 			available = m_pData->ReadSourceData( (void **)(&pData), m_offset + total, blockSize - total, NULL );
 		}
 		pData     = tmpBlock;
