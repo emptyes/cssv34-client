@@ -997,8 +997,6 @@ if active == 1 then we are 1) not playing back demos ( where our commands are ig
 2 ) we have finished signing on to server
 ================
 */
-static int s_nExtraMouseDX = 0;
-static int s_nExtraMouseDY = 0;
 
 // Mouse deltas accumulated by ExtraMouseSample() between usercmds
 static int s_nExtraMouseDX = 0;
