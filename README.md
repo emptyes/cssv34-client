@@ -66,6 +66,12 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
   are printed once; `developer 1` shows every occurrence.
 - **Demos** are recorded in the v34 format (demo protocol 3, network protocol 7), also when `record` is started
   in the middle of a round. `src/devtools/check_demo.py <file.dem>` checks the structure of a demo.
+- **Maps** downloaded from servers are checked when they are loaded: a map whose data references
+  other data out of range is not loaded (the client disconnects with "Map ... is corrupted"),
+  broken optional data (a face's lightmap, overlays, detail props) is skipped.
+  `src/devtools/check_bsp.py <maps/*.bsp>` runs the same checks without the game.
+- **Configs** are never executed from a map's pakfile (a map could otherwise replace a config that
+  is executed from a bind).
 
 ---
 

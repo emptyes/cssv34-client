@@ -2541,7 +2541,11 @@ void Mod_LoadLeafs_Version_1( CMapLoadHelper &lh, CMapLoadHelper &ambientLightin
 		const dleafambientindex_t *pInTable = (const dleafambientindex_t *)ambientLightingTable.LumpBase();
 		for ( i = 0; i < count && bValid; i++ )
 		{
-			if ( (int)pInTable[i].firstAmbientSample + (int)pInTable[i].ambientSampleCount > nSampleCount )
+			// a leaf without samples borrows them from the leaf in firstAmbientSample
+			// (see Mod_LeafAmbientColorAtPos)
+			if ( pInTable[i].ambientSampleCount ?
+				(int)pInTable[i].firstAmbientSample + (int)pInTable[i].ambientSampleCount > nSampleCount :
+				(int)pInTable[i].firstAmbientSample >= count )
 				bValid = false;
 		}
 		if ( !bValid )
