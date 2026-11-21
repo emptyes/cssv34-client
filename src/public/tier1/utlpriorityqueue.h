@@ -128,8 +128,19 @@ void CUtlPriorityQueue<T>::RemoveAt( int index )
 	m_heap.FastRemove( index );
 
 	int count = Count();
-	if ( !count )
+	if ( index >= count )
 		return;
+
+	// The former tail may have higher priority than its new parent.
+	while ( index > 0 )
+	{
+		int parent = (index - 1) / 2;
+		if ( !m_LessFunc( m_heap[parent], m_heap[index] ) )
+			break;
+
+		Swap( index, parent );
+		index = parent;
+	}
 
 	int half = count/2;
 	int larger = index;
