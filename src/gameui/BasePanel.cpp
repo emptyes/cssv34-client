@@ -149,7 +149,9 @@ void CGameMenuItem::ApplySchemeSettings(IScheme *pScheme)
 	SetDefaultBorder(NULL);
 	SetDepressedBorder(NULL);
 	SetKeyFocusBorder(NULL);
-	SetProportional(true);
+	// v34 draws the main menu with a fixed size font; scale it only where the rest of
+	// GameUI is proportional too (Android, -gameuiproportionality)
+	SetProportional( NeedProportional() );
 
 	vgui::HFont hMainMenuFont = pScheme->GetFont( "MainMenuFont", IsProportional() );
 
@@ -339,7 +341,7 @@ public:
 	virtual void ApplySchemeSettings(IScheme *pScheme)
 	{
 		BaseClass::ApplySchemeSettings(pScheme);
-		SetProportional(true);
+		SetProportional( NeedProportional() );
 
 		int height = atoi(pScheme->GetResourceString("MainMenu.MenuItemHeight"));
 
