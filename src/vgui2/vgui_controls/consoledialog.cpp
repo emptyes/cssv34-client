@@ -1098,29 +1098,39 @@ void CConsolePanel::DumpConsoleTextToFile()
 		{
 			wchar_t buf[512];
 			m_pHistory->GetText(pos, buf, sizeof(buf));
-			pos += sizeof(buf) / sizeof(wchar_t);
+
+			// GetText null-terminates, so it copies at most 511 characters: advance by
+			// what was actually copied, or one character per chunk is lost
+			int nChars = V_wcslen( buf );
 
 			// don't continue if none left
-			if (buf[0] == 0)
+			if ( nChars == 0 )
 				break;
 
-			// convert to ansi
-			char ansi[512];
+			pos += nChars;
+
+			// convert to UTF-8: up to 3 bytes per character (Cyrillic takes 2), a 512 byte
+			// buffer made the conversion of non-latin text fail and drop the whole chunk
+			char ansi[ARRAYSIZE( buf ) * 4];
 			g_pVGuiLocalize->ConvertUnicodeToANSI(buf, ansi, sizeof(ansi));
 
-			// write to disk
-			int len = strlen(ansi);
-			for (int i = 0; i < len; i++)
+			// write to disk, preceding newlines with a return
+			const char *pStart = ansi;
+			for ( const char *pCur = ansi; *pCur; pCur++ )
 			{
-				// preceed newlines with a return
-				if (ansi[i] == '\n')
-				{
-					char ret = '\r';
-					g_pFullFileSystem->Write( &ret, 1, handle );
-				}
+				if ( *pCur != '\n' )
+					continue;
 
-				g_pFullFileSystem->Write( ansi + i, 1, handle );
+				if ( pCur > pStart )
+					g_pFullFileSystem->Write( pStart, pCur - pStart, handle );
+
+				g_pFullFileSystem->Write( "\r\n", 2, handle );
+				pStart = pCur + 1;
 			}
+
+			int nTail = V_strlen( pStart );
+			if ( nTail > 0 )
+				g_pFullFileSystem->Write( pStart, nTail, handle );
 		}
 
 		g_pFullFileSystem->Close( handle );
