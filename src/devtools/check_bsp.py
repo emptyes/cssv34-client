@@ -7,12 +7,15 @@ disconnects with "Map ... is corrupted"), and silently drops some optional data
 checks without the game, so maps can be verified before playing:
 
     check_bsp.py cstrike/maps/*.bsp
+    check_bsp.py cstrike/maps cstrike/download/maps
     check_bsp.py -v de_dust2.bsp
 
 Exit code: 0 if no map has errors, 1 otherwise. Warnings don't change it.
 """
 
 import argparse
+import glob
+import os
 import lzma
 import struct
 import sys
@@ -575,12 +578,25 @@ class Checker:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('maps', nargs='+', help='.bsp files')
+    parser.add_argument('maps', nargs='+', help='.bsp files, masks (*.bsp) or folders')
     parser.add_argument('-v', '--verbose', action='store_true', help='print statistics')
     args = parser.parse_args()
 
+    # the Windows command line doesn't expand masks, and a folder means all maps in it
+    paths = []
+    for arg in args.maps:
+        if os.path.isdir(arg):
+            paths += sorted(glob.glob(os.path.join(arg, '*.bsp')))
+        elif glob.has_magic(arg):
+            found = sorted(glob.glob(arg))
+            if not found:
+                print('%s: no maps found' % arg)
+            paths += found
+        else:
+            paths.append(arg)
+
     failed = 0
-    for path in args.maps:
+    for path in paths:
         try:
             checker = Checker(Bsp(path), args.verbose)
             checker.run()
@@ -598,6 +614,8 @@ def main():
             print('  warning: %s' % w)
         if args.verbose:
             print('  ' + ', '.join('%s %d' % kv for kv in sorted(checker.stats.items())))
+    if len(paths) > 1:
+        print('%d maps checked, %d with errors' % (len(paths), failed))
     return 1 if failed else 0
 
 
