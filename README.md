@@ -55,7 +55,7 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
   - `-gameuiproportionality` scales the menus with the screen resolution (useful on large screens).
     By default the main menu uses a fixed size font, as in v34.
 - **Crosshair.** Besides the classic settings there are `cl_crosshairgap`, `cl_crosshair_drawoutline`,
-  `cl_crosshair_outlinethickness` and `cl_crosshair_t` (T-style); they are also in Options > Extra.
+  `cl_crosshair_outlinethickness`, `cl_crosshair_t` (T-style) and `cl_crosshair_dotsize`; they are also in Options > Extra.
   All of them are client-side only.
 - **HTML MOTD.** Off by default (`cl_disablehtmlmotd 1`: the text version is shown). When enabled in
   Options > Extra, HTML pages are drawn inside the game by the Windows WebBrowser control, as in the original

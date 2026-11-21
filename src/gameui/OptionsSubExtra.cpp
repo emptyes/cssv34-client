@@ -44,6 +44,7 @@ static const ExtraSliderDef_t s_Sliders[] =
 	{ EXTRA_STR_XH_SIZE,  "cl_crosshairsize",      0.0f,  15.0f, "%.1f" },
 	{ EXTRA_STR_XH_THICK, "cl_crosshairthickness", 0.1f,  3.0f,  "%.1f" },
 	{ EXTRA_STR_XH_GAP,   "cl_crosshairgap",      -5.0f,  10.0f, "%.1f" },
+	{ EXTRA_STR_XH_DOTSIZE, "cl_crosshair_dotsize", 0.0f, 5.0f,  "%.1f" },
 };
 
 struct ExtraCheckDef_t

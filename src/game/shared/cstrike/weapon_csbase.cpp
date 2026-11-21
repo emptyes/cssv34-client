@@ -328,6 +328,7 @@ LINK_ENTITY_TO_CLASS( weapon_cs_base, CWeaponCSBase );
 	ConVar cl_crosshair_drawoutline( "cl_crosshair_drawoutline", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Draw a black outline around the crosshair" );
 	ConVar cl_crosshair_outlinethickness( "cl_crosshair_outlinethickness", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Crosshair outline thickness in pixels", true, 1.0f, true, 3.0f );
 	ConVar cl_crosshair_t( "cl_crosshair_t", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "T-style crosshair: no top line" );
+	ConVar cl_crosshair_dotsize( "cl_crosshair_dotsize", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Size of the crosshair dot, in the units of cl_crosshairthickness (0 = same as the line thickness)", true, 0.0f, true, 5.0f );
 
 #if ALLOW_WEAPON_SPREAD_DISPLAY
 	ConVar weapon_debug_spread_show( "weapon_debug_spread_show", "0", FCVAR_CLIENTDLL | FCVAR_DEVELOPMENTONLY, "Enables display of weapon accuracy; 1: show accuracy box, 2: show box with recoil offset" );
@@ -1224,7 +1225,15 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 
 			// dot
 			if ( cl_crosshairdot.GetBool() )
-				rects[nRects++] = { x0, y0, x1, y1 };
+			{
+				int iDotSize = iBarThickness;
+				if ( cl_crosshair_dotsize.GetFloat() > 0.0f )
+					iDotSize = MAX( 1, RoundFloatToInt( YRES( cl_crosshair_dotsize.GetFloat() ) ) );
+
+				int dx0 = iCenterX - iDotSize / 2;
+				int dy0 = iCenterY - iDotSize / 2;
+				rects[nRects++] = { dx0, dy0, dx0 + iDotSize, dy0 + iDotSize };
+			}
 
 			if ( cl_crosshair_drawoutline.GetBool() )
 			{
