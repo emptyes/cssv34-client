@@ -96,6 +96,26 @@ static CClientSendTable* FindClientSendTable( const char *pName )
 }
 
 
+static bool IsSendTableHierarchySane( const SendTable *pTable, int nDepth, int &nVisits )
+{
+	const int MAX_DEPTH = 32;
+	const int MAX_VISITS = 1 << 16;
+
+	if ( nDepth > MAX_DEPTH || ++nVisits > MAX_VISITS )
+		return false;
+
+	for ( int iProp=0; iProp < pTable->m_nProps; iProp++ )
+	{
+		const SendProp *pProp = &pTable->m_pProps[iProp];
+		if ( pProp->m_Type == DPT_DataTable && pProp->GetDataTable() &&
+			 !IsSendTableHierarchySane( pProp->GetDataTable(), nDepth + 1, nVisits ) )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 // Find all child datatable properties for the send tables.
 bool SetupClientSendTableHierarchy()
 {
@@ -125,6 +145,18 @@ bool SetupClientSendTableHierarchy()
 
 				pProp->SetDataTable( &pChild->m_SendTable );
 			}
+		}
+	}
+
+	// A table that (indirectly) contains itself sends every recursive walk of the
+	// hierarchy into endless recursion. Real hierarchies are a few levels deep.
+	FOR_EACH_LL( g_ClientSendTables, iClientTable )
+	{
+		int nVisits = 0;
+		if ( !IsSendTableHierarchySane( &g_ClientSendTables[iClientTable]->m_SendTable, 0, nVisits ) )
+		{
+			DataTable_Warning( "SetupClientSendTableHierarchy: SendTable '%s' has a cyclic or too deep hierarchy.\n", g_ClientSendTables[iClientTable]->GetName() );
+			return false;
 		}
 	}
 	
@@ -366,6 +398,22 @@ SendTable *RecvTable_ReadInfos( bf_read *pBuf, int nDemoProtocol )
 				pProp->m_fHighValue = pBuf->ReadBitFloat();
 				pProp->m_nBits = pBuf->ReadUBitLong( PROPINFOBITS_NUMBITS );
 			}
+		}
+
+		// Tables come from the server or a demo file. The type indexes g_PropTypeFns
+		// (demos decode props the client doesn't know, without a type match), and the
+		// decoders handle at most 32 bits.
+		bool bValid = !pBuf->IsOverflowed() && pProp->m_Type >= 0 && pProp->m_Type < DPT_NUMSendPropTypes;
+		if ( bValid && pProp->m_Type == DPT_Array && !pProp->IsExcludeProp() )
+			bValid = pProp->GetNumElements() >= 1 && pProp->GetNumElements() <= MAX_ARRAY_ELEMENTS;
+		if ( bValid && pProp->m_Type != DPT_DataTable && pProp->m_Type != DPT_Array && !pProp->IsExcludeProp() )
+			bValid = pProp->m_nBits <= 32;
+
+		if ( !bValid )
+		{
+			DataTable_Warning( "RecvTable_ReadInfos: invalid property %d in table '%s'.\n", iProp, pTable->m_pNetTableName ? pTable->m_pNetTableName : "" );
+			RecvTable_FreeSendTable( pTable );
+			return NULL;
 		}
 	}
 
