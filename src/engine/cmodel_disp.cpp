@@ -263,8 +263,34 @@ public:
 		int totalHullData = 0;
 		m_dispHullOffset.SetCount(g_DispCollTreeCount);
 		Assert(pLump->numDisplacements==g_DispCollTreeCount);
-		// count the size of the lump
+
+		// The lump comes from the map file: the table must describe exactly our displacements
+		// and fit in the lump together with the hull data, otherwise the hulls are built at
+		// runtime (as for maps without this lump).
 		unsigned short *pDataSize = (unsigned short *)(pLump+1);
+		{
+			bool bValid = lumpSize >= (int)sizeof( dphysdisp_t ) && pLump->numDisplacements == g_DispCollTreeCount &&
+				(int64)sizeof( dphysdisp_t ) + (int64)pLump->numDisplacements * sizeof( unsigned short ) <= lumpSize;
+			if ( bValid )
+			{
+				int64 nHullBytes = 0;
+				for ( int i = 0; i < pLump->numDisplacements; i++ )
+				{
+					if ( pDataSize[i] != (unsigned short)-1 )
+						nHullBytes += pDataSize[i];
+				}
+				bValid = (int64)sizeof( dphysdisp_t ) + (int64)pLump->numDisplacements * sizeof( unsigned short ) + nHullBytes <= lumpSize;
+			}
+			if ( !bValid )
+			{
+				Warning( "Map has invalid displacement collision data, ignoring it\n" );
+				m_dispHullOffset.Purge();
+				m_pDispHullData = NULL;
+				return;
+			}
+		}
+
+		// count the size of the lump
 		for ( int i = 0; i < pLump->numDisplacements; i++ )
 		{
 			if ( pDataSize[i] == (unsigned short)-1 )
@@ -283,6 +309,8 @@ public:
 		Assert( offset + totalHullData == lumpSize );
 #endif
 	}
+	bool HasHullData() const { return m_pDispHullData != NULL; }
+
 	void LevelShutdown()
 	{
 		m_dispHullOffset.Purge();
@@ -330,7 +358,7 @@ void CM_CreateDispPhysCollide( dphysdisp_t *pDispLump, int dispLumpSize )
 		virtualmeshparams_t params;
 		params.pMeshEventHandler = &g_VirtualTerrain;
 		params.userData = (void *)i;
-		params.buildOuterHull = dispLumpSize > 0 ? false : true;
+		params.buildOuterHull = g_VirtualTerrain.HasHullData() ? false : true;
 
 		g_TerrainList[i] = physcollision->CreateVirtualMesh( params );
 	}

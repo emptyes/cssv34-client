@@ -234,6 +234,100 @@ void CollisionBSPData_PreLoad( CCollisionBSPData *pBSPData )
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// Purpose: Checks the references between the loaded lumps. Maps are downloaded
+//          from servers, and the tracing, PVS and area code index these arrays
+//          with the values from the file without further checks.
+//-----------------------------------------------------------------------------
+static bool CollisionBSPData_Validate( CCollisionBSPData *pBSPData )
+{
+	const char *pszError = NULL;
+	int nIndex = 0;
+
+	for ( int i = 0; i < pBSPData->numleafs && !pszError; i++ )
+	{
+		const cleaf_t &leaf = pBSPData->map_leafs[i];
+		if ( (int)leaf.firstleafbrush + (int)leaf.numleafbrushes > pBSPData->numleafbrushes )
+			pszError = "leaf brush range";
+		else if ( leaf.area < 0 || ( leaf.area > 0 && leaf.area >= pBSPData->numareas ) )
+			pszError = "leaf area";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pBSPData->numleafbrushes && !pszError; i++ )
+	{
+		if ( pBSPData->map_leafbrushes[i] >= pBSPData->numbrushes )
+			pszError = "leaf brush";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pBSPData->numnodes && !pszError; i++ )
+	{
+		for ( int j = 0; j < 2; j++ )
+		{
+			int child = pBSPData->map_nodes[i].children[j];
+			if ( child >= 0 ? child >= pBSPData->numnodes : -1 - child >= pBSPData->numleafs )
+				pszError = "node child";
+		}
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pBSPData->numcmodels && !pszError; i++ )
+	{
+		int headnode = pBSPData->map_cmodels[i].headnode;
+		if ( headnode >= 0 ? headnode >= pBSPData->numnodes : -1 - headnode >= pBSPData->numleafs )
+			pszError = "model head node";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pBSPData->numareas && !pszError; i++ )
+	{
+		const carea_t &area = pBSPData->map_areas[i];
+		if ( area.firstareaportal < 0 || area.numareaportals < 0 ||
+			area.firstareaportal + area.numareaportals > pBSPData->numareaportals )
+			pszError = "area portal range";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pBSPData->numareaportals && !pszError; i++ )
+	{
+		const dareaportal_t &portal = pBSPData->map_areaportals[i];
+		if ( portal.m_PortalKey >= pBSPData->numportalopen ||
+			( pBSPData->numareas > 0 && portal.otherarea >= pBSPData->numareas ) )
+			pszError = "area portal";
+		nIndex = i;
+	}
+
+	if ( !pszError && pBSPData->map_vis )
+	{
+		// header: numclusters, then bitofs[numclusters][2]; every offset must point into the lump
+		const int nVisSize = pBSPData->numvisibility;
+		const dvis_t *pVis = pBSPData->map_vis;
+		if ( nVisSize < (int)sizeof( int ) || pVis->numclusters < 0 || pVis->numclusters > MAX_MAP_CLUSTERS ||
+			(int64)sizeof( int ) + (int64)pVis->numclusters * 2 * sizeof( int ) > nVisSize )
+		{
+			pszError = "visibility header";
+		}
+		for ( int i = 0; i < ( pszError ? 0 : pVis->numclusters ) && !pszError; i++ )
+		{
+			for ( int j = 0; j < 2; j++ )
+			{
+				if ( pVis->bitofs[i][j] < 0 || pVis->bitofs[i][j] >= nVisSize )
+					pszError = "visibility offset";
+			}
+			nIndex = i;
+		}
+	}
+
+	if ( pszError )
+	{
+		Host_Error( "Map %s is corrupted: bad %s (%d)\n", pBSPData->map_name, pszError, nIndex );
+		return false;
+	}
+
+	return true;
+}
+
 bool CollisionBSPData_Load( const char *pName, CCollisionBSPData *pBSPData )
 {
 	// This is a table that maps texinfo references to csurface_t
@@ -281,6 +375,10 @@ bool CollisionBSPData_Load( const char *pName, CCollisionBSPData *pBSPData )
 
 	COM_TimestampedLog( "  CollisionBSPData_LoadVisibility" );
 	CollisionBSPData_LoadVisibility( pBSPData );
+
+	COM_TimestampedLog( "  CollisionBSPData_Validate" );
+	if ( !CollisionBSPData_Validate( pBSPData ) )
+		return false;
 
 	COM_TimestampedLog( "  CollisionBSPData_LoadEntityString" );
 	CollisionBSPData_LoadEntityString( pBSPData );
@@ -333,16 +431,23 @@ void CollisionBSPData_LoadTextures( CCollisionBSPData *pBSPData )
 
 	pBSPData->numtextures = count;
 
-	pBSPData->map_texturenames = (char *)Hunk_Alloc( lhStringData.LumpSize() * sizeof(char), false );
-	memcpy( pBSPData->map_texturenames, pStringData, lhStringData.LumpSize() );
+	// the names are used as C strings: keep a terminator after the last one even if the map has none
+	int nStringDataSize = lhStringData.LumpSize();
+	int nStringTableCount = lhStringTable.LumpSize() / sizeof( int );
+	pBSPData->map_texturenames = (char *)Hunk_Alloc( nStringDataSize + 1, false );
+	memcpy( pBSPData->map_texturenames, pStringData, nStringDataSize );
+	pBSPData->map_texturenames[nStringDataSize] = '\0';
  
 	for ( i=0 ; i<count ; i++, in++ )
 	{
-		Assert( in->nameStringTableID >= 0 );
-		Assert( pStringTable[in->nameStringTableID] >= 0 );
+		if ( in->nameStringTableID < 0 || in->nameStringTableID >= nStringTableCount ||
+			pStringTable[in->nameStringTableID] < 0 || pStringTable[in->nameStringTableID] >= nStringDataSize )
+		{
+			Host_Error( "CMod_LoadTextures: bad texture name index %d in %s\n", in->nameStringTableID, pBSPData->map_name );
+			return;
+		}
 
-		const char *pInName = &pStringData[pStringTable[in->nameStringTableID]];
-		int index = pInName - pStringData;
+		int index = pStringTable[in->nameStringTableID];
 		
 		csurface_t *out = &pBSPData->map_surfaces[i];
 		out->name = &pBSPData->map_texturenames[index];
@@ -758,6 +863,26 @@ void CollisionBSPData_LoadBrushSides( CCollisionBSPData *pBSPData, CUtlVector<un
 	// done
 	//
 
+	// everything below indexes the input sides, the planes and the texinfo table with values
+	// from the file, so check them first
+	for ( i = 0; i < inputSideCount; i++ )
+	{
+		if ( in[i].planenum >= pBSPData->numplanes || in[i].texinfo >= map_texinfo.Count() )
+		{
+			Host_Error( "CMod_LoadBrushSides: bad plane or texinfo in brush side %d\n", i );
+			return;
+		}
+	}
+	for ( i = 0; i < pBSPData->numbrushes; i++ )
+	{
+		const cbrush_t &brush = pBSPData->map_brushes[i];
+		if ( (int)brush.firstbrushside + (int)brush.numsides > inputSideCount )
+		{
+			Host_Error( "CMod_LoadBrushSides: bad side range in brush %d\n", i );
+			return;
+		}
+	}
+
 	int boxBrushCount = 0;
 	int brushSideCount = 0;
 	for ( i = 0; i < pBSPData->numbrushes; i++ )
@@ -889,6 +1014,11 @@ void CollisionBSPData_LoadNodes( CCollisionBSPData *pBSPData )
 	for (i=0; i<count; i++, in++)
 	{
 		cnode_t	*out = &pBSPData->map_nodes[i];
+		if ( in->planenum < 0 || in->planenum >= pBSPData->numplanes )
+		{
+			Host_Error( "CollisionBSPData_LoadNodes: bad plane in node %d\n", i );
+			return;
+		}
 		out->plane = &pBSPData->map_planes[ in->planenum ];
 		for (j=0; j<2; j++)
 		{
@@ -1255,6 +1385,33 @@ void CollisionBSPData_LoadDispInfo( CCollisionBSPData *pBSPData )
 		if ( pFaces->numedges > 4 )
 			continue;
 
+		// the face, edge and vertex indices come from the file
+		{
+			const int nSurfEdges = lhs.LumpSize() / sizeof( int );
+			const int nEdges = lhe.LumpSize() / sizeof( dedge_t );
+			const int nVerts = lhv.LumpSize() / sizeof( dvertex_t );
+			bool bBad = pFaces->firstedge < 0 || pFaces->numedges < 0 ||
+				pFaces->firstedge + pFaces->numedges > nSurfEdges ||
+				pFaces->texinfo < 0 || pFaces->texinfo >= (int)( lhti.LumpSize() / sizeof( texinfo_t ) );
+			for ( int j = 0; j < pFaces->numedges && !bBad; j++ )
+			{
+				int eIndex = pSurfEdges[pFaces->firstedge+j];
+				if ( eIndex == INT_MIN || abs( eIndex ) >= nEdges )
+				{
+					bBad = true;
+					break;
+				}
+				const dedge_t &edge = pEdges[abs( eIndex )];
+				if ( edge.v[eIndex < 0 ? 1 : 0] >= nVerts )
+					bBad = true;
+			}
+			if ( bBad )
+			{
+				Host_Error( "CMod_LoadDispInfo: bad face data for displacement %d\n", i );
+				return;
+			}
+		}
+
 		Vector surfPoints[4];
 		pDispSurf->SetPointCount( pFaces->numedges );
 		int j;
@@ -1303,7 +1460,7 @@ void CollisionBSPData_LoadDispInfo( CCollisionBSPData *pBSPData )
 
 		// Surface props.
 		texinfo_t *pTex = &pTexinfoList[pFaces->texinfo];
-		if ( pTex->texdata >= 0 )
+		if ( pTex->texdata >= 0 && pTex->texdata < pBSPData->numtextures )
 		{
 			IMaterial *pMaterial = materials->FindMaterial( pBSPData->map_surfaces[pTex->texdata].name, TEXTURE_GROUP_WORLD, true );
 			if ( !IsErrorMaterial( pMaterial ) )

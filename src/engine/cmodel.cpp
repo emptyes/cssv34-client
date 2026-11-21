@@ -2332,7 +2332,7 @@ void CM_DecompressVis( CCollisionBSPData *pBSPData, int cluster, int visType, by
 		Assert( false ); // Shouldn't ever happen.
 	}
 
-	if ( cluster > pBSPData->numclusters || cluster < 0 )
+	if ( cluster >= pBSPData->numclusters || cluster < 0 )
 	{
 		// This can happen if this is called while the level is loading. See Map_VisCurrentCluster.
 		CM_NullVis( pBSPData, out );
@@ -2346,23 +2346,38 @@ void CM_DecompressVis( CCollisionBSPData *pBSPData, int cluster, int visType, by
 		return;		
 	}
 
-	byte *in = ((byte *)pBSPData->map_vis) + pBSPData->map_vis->bitofs[cluster][visType];
+	// the leafs can reference more clusters than the vis lump has (the offsets themselves
+	// are checked when the map is loaded)
+	if ( cluster >= pBSPData->map_vis->numclusters )
+	{
+		CM_NullVis( pBSPData, out );
+		return;
+	}
+
+	const byte *in = ((const byte *)pBSPData->map_vis) + pBSPData->map_vis->bitofs[cluster][visType];
+	const byte *in_end = ((const byte *)pBSPData->map_vis) + pBSPData->numvisibility;
 	numClusterBytes = (pBSPData->numclusters+7)>>3;	
 	out_p = out;
 
-	// no vis info, so make all visible
-	if ( !in )
-	{	
-		CM_NullVis( pBSPData, out );
-		return;		
-	}
-
 	do
 	{
+		if ( in >= in_end )
+		{
+			// truncated data: treat everything as visible rather than read past the lump
+			CM_NullVis( pBSPData, out );
+			return;
+		}
+
 		if (*in)
 		{
 			*out_p++ = *in++;
 			continue;
+		}
+
+		if ( in + 1 >= in_end )
+		{
+			CM_NullVis( pBSPData, out );
+			return;
 		}
 
 		c = in[1];
