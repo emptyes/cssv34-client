@@ -1138,6 +1138,36 @@ bool COverlayMgr::LoadOverlays( )
 	int nOverlayCount = lh.LumpSize() / sizeof( doverlay_t );
 	int nWaterOverlayCount = lh2.LumpSize() / sizeof( dwateroverlay_t );
 
+	// The fades are read in parallel with the overlays
+	if ( pOverlayFadesIn && (int)( lhOverlayFades.LumpSize() / sizeof( doverlayfade_t ) ) < nOverlayCount )
+		pOverlayFadesIn = NULL;
+
+	// The texinfo, the face count and the face indices come from the map file; the face list
+	// arrays have a fixed size. A map with broken overlays is loaded without overlays.
+	{
+		worldbrushdata_t *pMap = lh.GetMap();
+		bool bValid = true;
+		for ( int i = 0; i < nOverlayCount && bValid; i++ )
+		{
+			const doverlay_t &in = pOverlayIn[i];
+			bValid = in.nTexInfo >= 0 && in.nTexInfo < pMap->numtexinfo && in.GetFaceCount() <= OVERLAY_BSP_FACE_COUNT;
+			for ( int iFace = 0; bValid && iFace < in.GetFaceCount(); iFace++ )
+				bValid = in.aFaces[iFace] >= 0 && in.aFaces[iFace] < pMap->numsurfaces;
+		}
+		for ( int i = 0; i < nWaterOverlayCount && bValid; i++ )
+		{
+			const dwateroverlay_t &in = pWaterOverlayIn[i];
+			bValid = in.nTexInfo >= 0 && in.nTexInfo < pMap->numtexinfo && in.GetFaceCount() <= WATEROVERLAY_BSP_FACE_COUNT;
+			for ( int iFace = 0; bValid && iFace < in.GetFaceCount(); iFace++ )
+				bValid = in.aFaces[iFace] >= 0 && in.aFaces[iFace] < pMap->numsurfaces;
+		}
+		if ( !bValid )
+		{
+			Warning( "Map has invalid overlay data, overlays are not loaded\n" );
+			return false;
+		}
+	}
+
 	// Memory allocation!
 	m_aOverlays.SetSize( nOverlayCount + nWaterOverlayCount );
 
@@ -1149,7 +1179,7 @@ bool COverlayMgr::LoadOverlays( )
 		pOverlayOut->m_nTexInfo = pOverlayIn->nTexInfo;
 		pOverlayOut->m_nRenderOrder = pOverlayIn->GetRenderOrder();
 		if ( pOverlayOut->m_nRenderOrder >= OVERLAY_NUM_RENDER_ORDERS )
-			Error( "COverlayMgr::LoadOverlays: invalid render order (%d) for an overlay.", pOverlayOut->m_nRenderOrder );
+			pOverlayOut->m_nRenderOrder = 0;	// can't happen: the order is 2 bits
 
 		pOverlayOut->m_flU[0] = pOverlayIn->flU[0];
 		pOverlayOut->m_flU[1] = pOverlayIn->flU[1];
@@ -1215,7 +1245,7 @@ bool COverlayMgr::LoadOverlays( )
 		pOverlayOut->m_nTexInfo = pWaterOverlayIn->nTexInfo;
 		pOverlayOut->m_nRenderOrder = pWaterOverlayIn->GetRenderOrder();
 		if ( pOverlayOut->m_nRenderOrder >= OVERLAY_NUM_RENDER_ORDERS )
-			Error( "COverlayMgr::LoadOverlays: invalid render order (%d) for an overlay.", pOverlayOut->m_nRenderOrder );
+			pOverlayOut->m_nRenderOrder = 0;	// can't happen: the order is 2 bits
 
 		pOverlayOut->m_flU[0] = pWaterOverlayIn->flU[0];
 		pOverlayOut->m_flU[1] = pWaterOverlayIn->flU[1];

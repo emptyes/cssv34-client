@@ -1024,6 +1024,9 @@ void CEngineClient::LinearToGamma( float* linear, float* gamma )
 // Get the lightstyle value
 float CEngineClient::LightStyleValue( int style )
 {
+	// the client passes styles from map data (detail props, static props)
+	if ( style < 0 || style >= (int)ARRAYSIZE( d_lightstylevalue ) )
+		return 0.0f;
 	return ::LightStyleValue( style );
 }
 

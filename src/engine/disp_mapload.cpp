@@ -631,6 +631,68 @@ bool DispInfo_LoadDisplacements( model_t *pWorld, bool bRestoring )
 			Host_Error( "DispInfo_LoadDisplacements: invalid displacement power (%d)\n", tempDisps[iDisp].power );
 			return false;
 		}
+
+		// the parent face must exist and be marked as a displacement face
+		int iFace = tempDisps[iDisp].m_iMapFace;
+		if ( iFace < 0 || iFace >= pWorld->brush.pShared->numsurfaces ||
+			!( MSurf_Flags( SurfaceHandleFromIndex( iFace, pWorld->brush.pShared ) ) & SURFDRAW_HAS_DISP ) )
+		{
+			Host_Error( "DispInfo_LoadDisplacements: invalid parent face (%d) for displacement %d\n", iFace, iDisp );
+			return false;
+		}
+
+		// neighbor indices are used as array indices, the span and orientation as table
+		// indices: treat invalid ones as "no neighbor"
+		for ( int iEdge = 0; iEdge < 4; iEdge++ )
+		{
+			for ( int iSub = 0; iSub < 2; iSub++ )
+			{
+				CDispSubNeighbor &sub = tempDisps[iDisp].m_EdgeNeighbors[iEdge].m_SubNeighbors[iSub];
+				if ( sub.IsValid() && ( sub.m_iNeighbor >= nDisplacements || sub.m_NeighborOrientation > ORIENTATION_CCW_270 ||
+					sub.m_Span > MIDPOINT_TO_CORNER || sub.m_NeighborSpan > MIDPOINT_TO_CORNER ) )
+				{
+					sub.SetInvalid();
+				}
+			}
+		}
+		for ( int iCorner = 0; iCorner < 4; iCorner++ )
+		{
+			CDispCornerNeighbors &corner = tempDisps[iDisp].m_CornerNeighbors[iCorner];
+			int nValid = 0;
+			for ( int i = 0; i < MIN( (int)corner.m_nNeighbors, MAX_DISP_CORNER_NEIGHBORS ); i++ )
+			{
+				if ( corner.m_Neighbors[i] < nDisplacements )
+					corner.m_Neighbors[nValid++] = corner.m_Neighbors[i];
+			}
+			corner.m_nNeighbors = nValid;
+		}
+	}
+
+	// every displacement face must get its displacement, and only one
+	for ( int iFace = 0; iFace < pWorld->brush.pShared->numsurfaces; iFace++ )
+	{
+		SurfaceHandle_t surfID = SurfaceHandleFromIndex( iFace, pWorld->brush.pShared );
+		if ( MSurf_Flags( surfID ) & SURFDRAW_HAS_DISP )
+			surfID->pDispInfo = NULL;
+	}
+	for ( int iDisp = 0; iDisp < nDisplacements; ++iDisp )
+	{
+		SurfaceHandle_t surfID = SurfaceHandleFromIndex( tempDisps[iDisp].m_iMapFace, pWorld->brush.pShared );
+		if ( surfID->pDispInfo )
+		{
+			Host_Error( "DispInfo_LoadDisplacements: face %d has more than one displacement\n", tempDisps[iDisp].m_iMapFace );
+			return false;
+		}
+		surfID->pDispInfo = (IDispInfo *)1;	// marked; set for real by DispInfo_LinkToParentFaces
+	}
+	for ( int iFace = 0; iFace < pWorld->brush.pShared->numsurfaces; iFace++ )
+	{
+		SurfaceHandle_t surfID = SurfaceHandleFromIndex( iFace, pWorld->brush.pShared );
+		if ( ( MSurf_Flags( surfID ) & SURFDRAW_HAS_DISP ) && !surfID->pDispInfo )
+		{
+			Host_Error( "DispInfo_LoadDisplacements: face %d has no displacement\n", iFace );
+			return false;
+		}
 	}
 
 	// Now hook up the displacements to their parents.

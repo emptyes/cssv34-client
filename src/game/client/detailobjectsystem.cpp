@@ -408,6 +408,7 @@ public:
 	bool EnumerateLeaf( int leaf, intp context );
 
 	DetailPropLightstylesLump_t& DetailLighting( int i ) { return m_DetailLighting[i]; }
+	int DetailLightingCount() const { return m_DetailLighting.Count(); }
 	DetailPropSpriteDict_t& DetailSpriteDict( int i ) { return m_DetailSpriteDict[i]; }
 
 private:
@@ -911,6 +912,9 @@ void CDetailModel::GetColorModulation( float *color )
 		{
 			int nLightStyles = gm_LightStylesMap[iInfo].m_LightStyleCount;
 			int iLightStyle = gm_LightStylesMap[iInfo].m_LightStyle;
+			// the range comes from the map file
+			if ( iLightStyle < 0 || iLightStyle + nLightStyles > s_DetailObjectSystem.DetailLightingCount() )
+				nLightStyles = 0;
 			for (int i = 0; i < nLightStyles; ++i)
 			{
 				DetailPropLightstylesLump_t& lighting = s_DetailObjectSystem.DetailLighting( iLightStyle + i );
@@ -1583,14 +1587,27 @@ IClientRenderable* CDetailObjectSystem::GetDetailModel( int idx )
 //-----------------------------------------------------------------------------
 // Unserialization
 //-----------------------------------------------------------------------------
+// The detail prop lumps come from the map file: every count must fit in the bytes left
+static bool DetailCountFits( CUtlBuffer &buf, int nCount, int nElementSize )
+{
+	return nCount >= 0 && (int64)nCount * nElementSize <= buf.TellMaxPut() - buf.TellGet();
+}
+
 void CDetailObjectSystem::UnserializeModelDict( CUtlBuffer& buf )
 {
 	int count = buf.GetInt();
+	if ( !DetailCountFits( buf, count, sizeof(DetailObjectDictLump_t) ) )
+	{
+		Warning( "Map has invalid detail prop data (model dictionary), ignoring detail props\n" );
+		buf.SeekGet( CUtlBuffer::SEEK_TAIL, 0 );
+		return;
+	}
 	m_DetailObjectDict.EnsureCapacity( count );
 	while ( --count >= 0 )
 	{
 		DetailObjectDictLump_t lump;
 		buf.Get( &lump, sizeof(DetailObjectDictLump_t) );
+		lump.m_Name[ sizeof( lump.m_Name ) - 1 ] = '\0';
 		
 		DetailModelDict_t dict;
 		dict.m_pModel = (model_t *)engine->LoadModel( lump.m_Name, true );
@@ -1609,6 +1626,12 @@ void CDetailObjectSystem::UnserializeModelDict( CUtlBuffer& buf )
 void CDetailObjectSystem::UnserializeDetailSprites( CUtlBuffer& buf )
 {
 	int count = buf.GetInt();
+	if ( !DetailCountFits( buf, count, sizeof(DetailSpriteDictLump_t) ) )
+	{
+		Warning( "Map has invalid detail prop data (sprite dictionary), ignoring detail props\n" );
+		buf.SeekGet( CUtlBuffer::SEEK_TAIL, 0 );
+		return;
+	}
 	m_DetailSpriteDict.EnsureCapacity( count );
 	m_DetailSpriteDictFlipped.EnsureCapacity( count );
 	while ( --count >= 0 )
@@ -1625,6 +1648,11 @@ void CDetailObjectSystem::UnserializeDetailSprites( CUtlBuffer& buf )
 void CDetailObjectSystem::UnserializeModelLighting( CUtlBuffer& buf )
 {
 	int count = buf.GetInt();
+	if ( !DetailCountFits( buf, count, sizeof(DetailPropLightstylesLump_t) ) )
+	{
+		Warning( "Map has invalid detail prop lighting data, ignoring it\n" );
+		return;
+	}
 	m_DetailLighting.EnsureCapacity( count );
 	while ( --count >= 0 )
 	{
@@ -1662,6 +1690,8 @@ void CDetailObjectSystem::ScanForCounts( CUtlBuffer& buf,
 {
 	int oldpos = buf.TellGet();								// we need to seek back
 	int count = buf.GetInt();
+	if ( !DetailCountFits( buf, count, sizeof(DetailObjectLump_t) ) )
+		count = 0;	// rejected again by UnserializeModels
 
 	int nOld = 0;
 	int nFast = 0;
@@ -1729,6 +1759,32 @@ void CDetailObjectSystem::UnserializeModels( CUtlBuffer& buf )
 	int nNumFastSpritesToAllocate;
 	int nMaxOldInLeaf;
 	int nMaxFastInLeaf;
+	// The leaf and the model/sprite index of every object come from the file. The leaf is
+	// an index into the client leaf system's arrays (written below), so check them all first.
+	{
+		int oldpos = buf.TellGet();
+		int nCheck = buf.GetInt();
+		bool bValid = DetailCountFits( buf, nCheck, sizeof(DetailObjectLump_t) );
+		const int nLeafs = engine->LevelLeafCount();
+		while ( bValid && --nCheck >= 0 )
+		{
+			DetailObjectLump_t lump;
+			buf.Get( &lump, sizeof(DetailObjectLump_t) );
+			if ( lump.m_Leaf >= nLeafs )
+				bValid = false;
+			else if ( lump.m_Type == DETAIL_PROP_TYPE_MODEL )
+				bValid = lump.m_DetailModel < m_DetailObjectDict.Count();
+			else if ( lump.m_Type == DETAIL_PROP_TYPE_SPRITE || lump.m_Type == DETAIL_PROP_TYPE_SHAPE_CROSS || lump.m_Type == DETAIL_PROP_TYPE_SHAPE_TRI )
+				bValid = lump.m_DetailModel < m_DetailSpriteDict.Count();
+		}
+		buf.SeekGet( CUtlBuffer::SEEK_HEAD, oldpos );
+		if ( !bValid )
+		{
+			Warning( "Map has invalid detail prop data, ignoring detail props\n" );
+			return;
+		}
+	}
+
 	ScanForCounts( buf, &nNumOldStyleObjects, &nNumFastSpritesToAllocate, &nMaxOldInLeaf, &nMaxFastInLeaf );
 
 	FreeSortBuffers();

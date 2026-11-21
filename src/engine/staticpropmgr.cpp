@@ -32,6 +32,7 @@
 #include "tier0/vprof.h"
 #include "render.h"
 #include "cmodel_engine.h"
+#include "cmodel_private.h"
 #include "datacache/imdlcache.h"
 #include "ModelInfo.h"
 #include "cdll_engine_int.h"
@@ -1265,15 +1266,27 @@ void CStaticPropMgr::Shutdown()
 //-----------------------------------------------------------------------------
 // Unserialize static prop model dictionary
 //-----------------------------------------------------------------------------
+// The static prop lump comes from the map file: every count must fit in the bytes left
+static bool StaticPropCountFits( CUtlBuffer &buf, int nCount, int nElementSize )
+{
+	return nCount >= 0 && (int64)nCount * nElementSize <= buf.TellMaxPut() - buf.TellGet();
+}
+
 void CStaticPropMgr::UnserializeModelDict( CUtlBuffer& buf )
 {
 	int count = buf.GetInt();
+	if ( !StaticPropCountFits( buf, count, sizeof(StaticPropDictLump_t) ) )
+	{
+		Host_Error( "Map has invalid static prop data (model dictionary)\n" );
+		return;
+	}
 	m_StaticPropDict.AddMultipleToTail( count );
 
 	for ( int i=0; i < count; i++ )
 	{
 		StaticPropDictLump_t lump;
 		buf.Get( &lump, sizeof(StaticPropDictLump_t) );
+		lump.m_Name[ sizeof( lump.m_Name ) - 1 ] = '\0';
 
 		StaticPropDict_t &dict = m_StaticPropDict[i];
 
@@ -1288,10 +1301,27 @@ void CStaticPropMgr::UnserializeLeafList( CUtlBuffer& buf )
 {
 	int nCount = buf.GetInt();
 	m_StaticPropLeaves.Purge();
+	if ( !StaticPropCountFits( buf, nCount, sizeof(StaticPropLeafLump_t) ) )
+	{
+		Host_Error( "Map has invalid static prop data (leaf list)\n" );
+		return;
+	}
 	if ( nCount > 0 )
 	{
 		m_StaticPropLeaves.AddMultipleToTail( nCount );
 		buf.Get( m_StaticPropLeaves.Base(), nCount * sizeof(StaticPropLeafLump_t) );
+
+		// the leafs are passed to the leaf system and the PVS code
+		const int nLeafs = GetCollisionBSPData()->numleafs - 1;	// without the collision code's extra empty leaf
+		for ( int i = 0; i < nCount; i++ )
+		{
+			if ( m_StaticPropLeaves[i].m_Leaf >= nLeafs )
+			{
+				m_StaticPropLeaves.Purge();
+				Host_Error( "Map has invalid static prop data (leaf %d)\n", i );
+				return;
+			}
+		}
 	}
 }
 
@@ -1325,7 +1355,27 @@ void CStaticPropMgr::UnserializeModels( CUtlBuffer& buf )
 		return;
 	}
 
+	int nLumpSize = 0;
+	switch ( nLumpVersion )
+	{
+		case 4: nLumpSize = sizeof( StaticPropLumpV4_t ); break;
+		case 5: nLumpSize = sizeof( StaticPropLumpV5_t ); break;
+		case 6: nLumpSize = sizeof( StaticPropLumpV6_t ); break;
+		case 7:
+		case 10: nLumpSize = ( s_MapVersion == 21 ) ? sizeof( StaticPropLumpV10_21_t ) : sizeof( StaticPropLumpV10_t ); break;
+		case 9: nLumpSize = sizeof( StaticPropLumpV9_t ); break;
+		case 11: nLumpSize = sizeof( StaticPropLumpV11_t ); break;
+		default:
+			Warning( "Unknown static prop lump version %d, static props can't be loaded...\n", nLumpVersion );
+			return;
+	}
+
 	int count = buf.GetInt();
+	if ( !StaticPropCountFits( buf, count, nLumpSize ) )
+	{
+		Host_Error( "Map has invalid static prop data (prop count)\n" );
+		return;
+	}
 
 	// Gotta preallocate the static props here so no rellocations take place
 	// the leaf list stores pointers to these tricky little guys.
@@ -1351,6 +1401,15 @@ void CStaticPropMgr::UnserializeModels( CUtlBuffer& buf )
 			case 11: UnserializeLump<StaticPropLumpV11_t>(&lump, buf); break;
 			default:
 				Assert("Unexpected version while deserializing lumps.");
+		}
+
+		// the model and leaf references come from the file
+		if ( lump.m_PropType >= m_StaticPropDict.Count() ||
+			(int)lump.m_FirstLeaf + (int)lump.m_LeafCount > m_StaticPropLeaves.Count() )
+		{
+			m_StaticProps.RemoveMultipleFromTail( count - i );
+			Host_Error( "Map has invalid static prop data (prop %d)\n", i );
+			return;
 		}
 
 		m_StaticProps[i].Init( i, lump, m_StaticPropDict[lump.m_PropType].m_pModel );

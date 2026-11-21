@@ -714,12 +714,24 @@ void IterateLightmapSamples( CDispInfo *pDisp, const ProcessLightmapSampleData_t
 	int smax = MSurf_LightmapExtents( pDisp->m_ParentSurfID )[0] + 1;
 	int tmax = MSurf_LightmapExtents( pDisp->m_ParentSurfID )[1] + 1;
 
+	// The start offset, the sample stream and the triangle numbers come from the map file:
+	// stop at the end of the sample data and skip samples on triangles the displacement
+	// doesn't have.
+	const int nSampleBytes = g_DispLightmapSamplePositions.Count();
+	if ( pDisp->m_iLightmapSamplePositionStart < 0 || pDisp->m_iLightmapSamplePositionStart >= nSampleBytes )
+		return;
+
 	unsigned char *pCurSample = &g_DispLightmapSamplePositions[pDisp->m_iLightmapSamplePositionStart];
+	const unsigned char *pSampleEnd = g_DispLightmapSamplePositions.Base() + nSampleBytes;
 
 	for( int t = 0 ; t<tmax ; t++ )
 	{
 		for( int s=0 ; s<smax ; s++ )
 		{
+			// a sample is 4 or 5 bytes
+			if ( pSampleEnd - pCurSample < 5 && ( pSampleEnd - pCurSample < 4 || *pCurSample == 255 ) )
+				return;
+
 			// Figure out what triangle this sample is on.
 			// NOTE: this usually stores 4 bytes per lightmap sample.
 			// It's a lot simpler and faster to just store the position but then it's
@@ -739,6 +751,9 @@ void IterateLightmapSamples( CDispInfo *pDisp, const ProcessLightmapSampleData_t
 			float a = (float)*(pCurSample++) / 255.0f;
 			float b = (float)*(pCurSample++) / 255.0f;
 			float c = (float)*(pCurSample++) / 255.0f;
+
+			if ( iTri >= pDisp->m_pPowerInfo->m_nTriInfos )
+				continue;
 
 			CTriInfo *pTri = &pDisp->m_pPowerInfo->m_pTriInfos[iTri];
 			Vector vPos = 
