@@ -692,6 +692,10 @@ bool CVTFTexture::LoadLowResData( CUtlBuffer &buf )
 //-----------------------------------------------------------------------------
 bool CVTFTexture::LoadImageData( CUtlBuffer &buf, const VTFFileHeader_t &header, int nSkipMipLevels )
 {
+	// the caller's skip count is based on the header, which may claim more mips than the image has
+	if ( nSkipMipLevels >= m_nMipCount )
+		nSkipMipLevels = m_nMipCount - 1;
+
 	// Fix up the mip count + size based on how many mip levels we skip...
 	if (nSkipMipLevels > 0)
 	{
@@ -878,6 +882,10 @@ bool CVTFTexture::ResourceMemorySection::LoadData( CUtlBuffer &buf, CByteswap &b
 	buf.Get( &iDataSize, sizeof( iDataSize ) );
 	byteSwap.SwapBufferToTargetEndian( &iDataSize );
 
+	// the size comes from the file: it must fit into what is left of it
+	if ( !buf.IsValid() || iDataSize < 0 || iDataSize > buf.TellMaxPut() - buf.TellGet() )
+		return false;
+
 	// Read the actual data
 	if ( !AllocateData( iDataSize ) )
 		return false;
@@ -915,6 +923,47 @@ bool CVTFTexture::SetupByteSwap( CUtlBuffer &buf )
 		return true;
 	}
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+// VTF files also come from untrusted sources (sprays of other players, textures
+// of downloaded maps). Reject images whose size the int based image math below
+// can't represent: an overflowed size used to allocate a smaller buffer than the
+// mip levels then written into it.
+//-----------------------------------------------------------------------------
+static const int VTF_MAX_DIMENSION = 16384;
+static const int VTF_MAX_DEPTH = 2048;
+static const int64 VTF_MAX_IMAGE_BYTES = 512 * 1024 * 1024;
+
+static bool IsVTFImageSizeValid( int nWidth, int nHeight, int nDepth, int nFaces, int nFrames, ImageFormat fmt )
+{
+	if ( nWidth <= 0 || nHeight <= 0 || nDepth <= 0 || nFaces <= 0 || nFrames <= 0 )
+		return false;
+
+	if ( nWidth > VTF_MAX_DIMENSION || nHeight > VTF_MAX_DIMENSION || nDepth > VTF_MAX_DEPTH )
+		return false;
+
+	// upper bound of one face of one frame with all mip levels: compressed formats
+	// are rounded up to 4x4 blocks and counted as at least one byte per texel
+	const bool bCompressed = ImageLoader::IsCompressed( fmt );
+	const int64 nBytesPerTexel = MAX( ImageLoader::SizeInBytes( fmt ), 1 );
+
+	int64 nFaceBytes = 0;
+	int w = nWidth, h = nHeight, d = nDepth;
+	for ( ;; )
+	{
+		int64 bw = bCompressed ? ( ( w + 3 ) & ~3 ) : w;
+		int64 bh = bCompressed ? ( ( h + 3 ) & ~3 ) : h;
+		nFaceBytes += bw * bh * d * nBytesPerTexel;
+
+		if ( w == 1 && h == 1 && d == 1 )
+			break;
+		w = MAX( w >> 1, 1 );
+		h = MAX( h >> 1, 1 );
+		d = MAX( d >> 1, 1 );
+	}
+
+	return nFaceBytes * nFaces * nFrames <= VTF_MAX_IMAGE_BYTES;
 }
 
 //-----------------------------------------------------------------------------
@@ -1068,6 +1117,13 @@ bool CVTFTexture::UnserializeEx( CUtlBuffer &buf, bool bHeaderOnly, int nForceFl
 	if ( ( header.imageFormat < IMAGE_FORMAT_UNKNOWN ) || ( header.imageFormat >= NUM_IMAGE_FORMATS ) )
 	{
 		Warning( "*** Encountered VTF invalid image format!\n" );
+		return false;
+	}
+	if ( !IsVTFImageSizeValid( header.width, header.height, header.depth,
+			( header.flags & TEXTUREFLAGS_ENVMAP ) ? CUBEMAP_FACE_COUNT : 1, header.numFrames, header.imageFormat ) )
+	{
+		Warning( "*** Encountered VTF with an invalid or too large image (%d x %d x %d, %d frames)!\n",
+			header.width, header.height, header.depth, header.numFrames );
 		return false;
 	}
 	
