@@ -36,6 +36,7 @@ public:
 	bool				m_bIsUISound : 1;
 	bool				m_bIsLateLoad : 1;
 	bool				m_bMixGroupsCached : 1;
+	bool				m_bLoadWarningShown : 1;	// a load warning was printed for this sound
 	byte				m_mixGroupCount;
 	// UNDONE: Use a fixed bit vec here?
 	byte				m_mixGroupList[8];

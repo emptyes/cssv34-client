@@ -34,6 +34,7 @@
 #include "cvar.h"
 #include "vstdlib/random.h"
 #include "tier1/utldict.h"
+#include "tier1/utlsymbol.h"
 #include "tier0/etwprof.h"
 #include "tier0/vprof.h"
 #include "gl_matsysiface.h"		// update materialsystem config
@@ -894,7 +895,18 @@ static bool ShouldPreventServerCommand( const ConCommandBase *pCommand )
 
 			if ( !pCommand->IsFlagSet( FCVAR_SERVER_CAN_EXECUTE ) )
 			{
-				Warning( "FCVAR_SERVER_CAN_EXECUTE prevented server running command: %s\n", pCommand->GetName() );
+				// v34 servers send commands like "clear" constantly (ad plugins): say it once per
+				// command, every time only with developer
+				static CUtlSymbolTable s_WarnedCommands( 0, 32, true );
+				const bool bFirstTime = !s_WarnedCommands.Find( pCommand->GetName() ).IsValid();
+				if ( bFirstTime || developer.GetInt() )
+				{
+					if ( bFirstTime )
+						s_WarnedCommands.AddString( pCommand->GetName() );
+
+					Warning( "FCVAR_SERVER_CAN_EXECUTE prevented server running command: %s%s\n", pCommand->GetName(),
+						developer.GetInt() ? "" : " (further attempts are not reported)" );
+				}
 				return true;
 			}
 		}

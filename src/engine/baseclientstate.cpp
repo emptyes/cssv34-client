@@ -1063,7 +1063,10 @@ bool CBaseClientState::ProcessSetConVar( NET_SetConVar *msg )
 		if ( !sv.IsActive() )
 		{
 			var.SetValue( value );
-			Log_Msg( LOG_CLIENT, "SetConVar: %s = \"%s\"\n", name, value );
+
+			// servers resend replicated cvars (plugins toggle sv_cheats etc.) many times a minute
+			if ( developer.GetInt() )
+				Log_Msg( LOG_CLIENT, "SetConVar: %s = \"%s\"\n", name, value );
 		}
 	}
 

@@ -344,7 +344,24 @@ CSfxTable::CSfxTable()
 	m_bIsUISound = false;
 	m_bIsLateLoad = false;
 	m_bMixGroupsCached = false;
+	m_bLoadWarningShown = false;
 	m_pDebugName = NULL;
+}
+
+extern ConVar developer;
+
+//-----------------------------------------------------------------------------
+// Missing or broken sounds are retried on every play: servers with custom sounds
+// (or cl_downloadfilter nosounds) produced the same warning hundreds of times.
+// Warn once per sound, every time only with developer.
+//-----------------------------------------------------------------------------
+static bool ShouldWarnSoundLoad( CSfxTable *pSfx )
+{
+	if ( pSfx->m_bLoadWarningShown && !developer.GetInt() )
+		return false;
+
+	pSfx->m_bLoadWarningShown = true;
+	return true;
 }
 
 
@@ -5183,12 +5200,12 @@ int S_StartDynamicSound( StartSoundParams_t& params )
 	{
 		// regular or streamed sound fx
 		pSource = S_LoadSound( params.pSfx, target_chan );
-		if ( pSource && !IsValidSampleRate( pSource->SampleRate() ) )
+		if ( pSource && !IsValidSampleRate( pSource->SampleRate() ) && ShouldWarnSoundLoad( params.pSfx ) )
 		{
 			Warning( "*** Invalid sample rate (%d) for sound '%s'.\n", pSource->SampleRate(), sndname );
 		}
 
-		if ( !pSource && !params.pSfx->m_bIsLateLoad )
+		if ( !pSource && !params.pSfx->m_bIsLateLoad && ShouldWarnSoundLoad( params.pSfx ) )
 		{
 			Warning( "Failed to load sound \"%s\", file probably missing from disk/repository\n", sndname );
 		}
@@ -5473,12 +5490,12 @@ int S_StartStaticSound( StartSoundParams_t& params )
 	{
 		// load regular or stream sound
 		pSource = S_LoadSound( params.pSfx, ch );
-		if ( pSource && !IsValidSampleRate( pSource->SampleRate() ) )
+		if ( pSource && !IsValidSampleRate( pSource->SampleRate() ) && ShouldWarnSoundLoad( params.pSfx ) )
 		{
 			Warning( "*** Invalid sample rate (%d) for sound '%s'.\n", pSource->SampleRate(), sndname );
 		}
 
-		if ( !pSource && !params.pSfx->m_bIsLateLoad )
+		if ( !pSource && !params.pSfx->m_bIsLateLoad && ShouldWarnSoundLoad( params.pSfx ) )
 		{
 			Warning( "Failed to load sound \"%s\", file probably missing from disk/repository\n", sndname );
 		}
