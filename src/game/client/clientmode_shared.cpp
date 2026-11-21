@@ -230,8 +230,14 @@ static void __MsgFunc_VGUIMenu( bf_read &msg )
 			const char *pszURL = keys->GetString( "msg", "" );
 			if ( Q_strncmp( pszURL, "http://", 7 ) != 0 && Q_strncmp( pszURL, "https://", 8 ) != 0 && Q_stricmp( pszURL, "about:blank" ) != 0 )
 			{
-				Warning( "Blocking MOTD URL '%s'; must begin with 'http://' or 'https://' or be about:blank\n", pszURL );
+				// plugins close the MOTD with an empty URL and show 0: don't load the URL,
+				// but still honor the hide request, and don't warn about the empty one
+				if ( pszURL[0] )
+					Warning( "Blocking MOTD URL '%s'; must begin with 'http://' or 'https://' or be about:blank\n", pszURL );
 				keys->deleteThis();
+
+				if ( !bShow )
+					gViewPortInterface->ShowPanel( viewport, false );
 				return;
 			}
 		}
