@@ -323,6 +323,11 @@ LINK_ENTITY_TO_CLASS( weapon_cs_base, CWeaponCSBase );
 	ConVar cl_crosshaircolor_r( "cl_crosshaircolor_r", "50", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
 	ConVar cl_crosshaircolor_g( "cl_crosshaircolor_g", "250", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
 	ConVar cl_crosshaircolor_b( "cl_crosshaircolor_b", "50", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	// client-side crosshair styling from later CS versions; the defaults keep the classic look
+	ConVar cl_crosshairgap( "cl_crosshairgap", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Extra distance of the crosshair lines from the center (negative brings them closer), added to the dynamic spread", true, -10.0f, true, 20.0f );
+	ConVar cl_crosshair_drawoutline( "cl_crosshair_drawoutline", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Draw a black outline around the crosshair" );
+	ConVar cl_crosshair_outlinethickness( "cl_crosshair_outlinethickness", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Crosshair outline thickness in pixels", true, 1.0f, true, 3.0f );
+	ConVar cl_crosshair_t( "cl_crosshair_t", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "T-style crosshair: no top line" );
 
 #if ALLOW_WEAPON_SPREAD_DISPLAY
 	ConVar weapon_debug_spread_show( "weapon_debug_spread_show", "0", FCVAR_CLIENTDLL | FCVAR_DEVELOPMENTONLY, "Enables display of weapon accuracy; 1: show accuracy box, 2: show box with recoil offset" );
@@ -1185,40 +1190,63 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 			break;
 		}
 
+		iCrosshairDistance = MAX( 0, iCrosshairDistance + RoundFloatToInt( YRES( cl_crosshairgap.GetFloat() ) ) );
+
 		int iCenterX = ScreenWidth() / 2;
 		int iCenterY = ScreenHeight() / 2;
 
 		if ( bCrosshairVisible )
 		{
-			// draw horizontal crosshair lines
+			struct CrosshairRect_t { int x0, y0, x1, y1; };
+			CrosshairRect_t rects[5];
+			int nRects = 0;
+
+			// horizontal crosshair lines
 			int iInnerLeft	= iCenterX - iCrosshairDistance - iBarThickness / 2;
 			int iInnerRight	= iInnerLeft + 2 * iCrosshairDistance + iBarThickness;
 			int iOuterLeft	= iInnerLeft - iBarSize;
 			int iOuterRight	= iInnerRight + iBarSize;
 			int y0 = iCenterY - iBarThickness / 2;
 			int y1 = y0 + iBarThickness;
-			DrawCrosshairRect( iOuterLeft, y0, iInnerLeft, y1, bAdditive );
-			DrawCrosshairRect( iInnerRight, y0, iOuterRight, y1, bAdditive );
+			rects[nRects++] = { iOuterLeft, y0, iInnerLeft, y1 };
+			rects[nRects++] = { iInnerRight, y0, iOuterRight, y1 };
 
-			// draw vertical crosshair lines
+			// vertical crosshair lines
 			int iInnerTop		= iCenterY - iCrosshairDistance - iBarThickness / 2;
 			int iInnerBottom	= iInnerTop + 2 * iCrosshairDistance + iBarThickness;
 			int iOuterTop		= iInnerTop - iBarSize;
 			int iOuterBottom	= iInnerBottom + iBarSize;
 			int x0 = iCenterX - iBarThickness / 2;
 			int x1 = x0 + iBarThickness;
-			DrawCrosshairRect( x0, iOuterTop, x1, iInnerTop, bAdditive );
-			DrawCrosshairRect( x0, iInnerBottom, x1, iOuterBottom, bAdditive );
+			if ( !cl_crosshair_t.GetBool() )
+				rects[nRects++] = { x0, iOuterTop, x1, iInnerTop };
+			rects[nRects++] = { x0, iInnerBottom, x1, iOuterBottom };
 
-			// draw dot
+			// dot
 			if ( cl_crosshairdot.GetBool() )
+				rects[nRects++] = { x0, y0, x1, y1 };
+
+			if ( cl_crosshair_drawoutline.GetBool() )
 			{
-				int x0 = iCenterX - iBarThickness / 2;
-				int x1 = x0 + iBarThickness;
-				int y0 = iCenterY - iBarThickness / 2;
-				int y1 = y0 + iBarThickness;
-				DrawCrosshairRect( x0, y0, x1, y1, bAdditive );
+				// black frame under every element, then restore the crosshair color/texture
+				int o = MAX( 1, RoundFloatToInt( cl_crosshair_outlinethickness.GetFloat() ) );
+				vgui::surface()->DrawSetColor( 0, 0, 0, alpha );
+				for ( int i = 0; i < nRects; i++ )
+					vgui::surface()->DrawFilledRect( rects[i].x0 - o, rects[i].y0 - o, rects[i].x1 + o, rects[i].y1 + o );
+
+				if ( bAdditive )
+				{
+					vgui::surface()->DrawSetColor( r, g, b, 200 );
+					vgui::surface()->DrawSetTexture( m_iCrosshairTextureID );
+				}
+				else
+				{
+					vgui::surface()->DrawSetColor( r, g, b, alpha );
+				}
 			}
+
+			for ( int i = 0; i < nRects; i++ )
+				DrawCrosshairRect( rects[i].x0, rects[i].y0, rects[i].x1, rects[i].y1, bAdditive );
 		}
 
 #if ALLOW_WEAPON_SPREAD_DISPLAY

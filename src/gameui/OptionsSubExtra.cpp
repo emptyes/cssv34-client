@@ -1,6 +1,6 @@
 //========= cssv34-client: extra options page ================================//
 //
-// Purpose: "Extra" tab in Options (radar customization, client additions)
+// Purpose: "Extra" tab in Options (radar and crosshair customization, client additions)
 //
 //=============================================================================//
 
@@ -40,6 +40,23 @@ static const ExtraSliderDef_t s_Sliders[] =
 	{ EXTRA_STR_SIZE,  "cl_radar_size",       0.5f,  2.5f,   "%.2f" },
 	{ EXTRA_STR_ICON,  "cl_radar_icon_scale", 0.3f,  3.0f,   "%.2f" },
 	{ EXTRA_STR_ALPHA, "cl_radaralpha",       0.0f,  255.0f, "%.0f" },
+	// crosshair (client.dll cvars, see weapon_csbase.cpp)
+	{ EXTRA_STR_XH_SIZE,  "cl_crosshairsize",      0.0f,  15.0f, "%.1f" },
+	{ EXTRA_STR_XH_THICK, "cl_crosshairthickness", 0.1f,  3.0f,  "%.1f" },
+	{ EXTRA_STR_XH_GAP,   "cl_crosshairgap",      -5.0f,  10.0f, "%.1f" },
+};
+
+struct ExtraCheckDef_t
+{
+	const char *caption;
+	const char *cvar;
+};
+
+static const ExtraCheckDef_t s_XhairChecks[] =
+{
+	{ EXTRA_STR_XH_OUTLINE, "cl_crosshair_drawoutline" },
+	{ EXTRA_STR_XH_T,       "cl_crosshair_t" },
+	{ EXTRA_STR_XH_DOT,     "cl_crosshairdot" },
 };
 
 //-----------------------------------------------------------------------------
@@ -176,6 +193,18 @@ COptionsSubExtra::COptionsSubExtra( vgui::Panel *parent ) : PropertyPage( parent
 		g_pVGuiLocalize->ConvertANSIToUnicode( s_Sliders[i].caption, m_wszSliderCaption[i], sizeof( m_wszSliderCaption[i] ) );
 	}
 
+	m_pXhairHeader = new Label( this, "XhairHeader", EXTRA_STR_XHAIR );
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_XHAIR, m_wszXhairHeader, sizeof( m_wszXhairHeader ) );
+	COMPILE_TIME_ASSERT( ARRAYSIZE( s_XhairChecks ) == NUM_XHAIR_CHECKS );
+	COMPILE_TIME_ASSERT( ARRAYSIZE( s_Sliders ) == NUM_SLIDERS );
+	for ( int i = 0; i < NUM_XHAIR_CHECKS; i++ )
+	{
+		char name[32];
+		Q_snprintf( name, sizeof( name ), "XhairCheck%d", i );
+		m_pXhairCheck[i] = new CCvarToggleCheckButton( this, name, s_XhairChecks[i].caption, s_XhairChecks[i].cvar );
+		g_pVGuiLocalize->ConvertANSIToUnicode( s_XhairChecks[i].caption, m_wszXhairCheck[i], sizeof( m_wszXhairCheck[i] ) );
+	}
+
 	m_pScoreboardHeader = new Label( this, "ScoreboardHeader", EXTRA_STR_SB );
 	m_pShowClientMod = new CCvarToggleCheckButton( this, "ShowClientMod", EXTRA_STR_CM, "cl_scoreboard_show_clientmod" );
 
@@ -246,6 +275,27 @@ int COptionsSubExtra::LayoutCheckButton( CheckButton *pCheck, const wchar_t *tex
 	return tall;
 }
 
+int COptionsSubExtra::LayoutSlider( int i, const SliderLayout_t &l, int x, int y, int yOffset, int wide )
+{
+	if ( l.bInline )
+	{
+		int capTall = ExtraApplyWrapped( m_pSliderCaption[i], m_wszSliderCaption[i], l.captionWide - 6 ) + 2;
+		int capY = MAX( 0, l.trackCenter - capTall / 2 );
+		int sx = x + l.captionWide;
+		m_pSliderCaption[i]->SetBounds( x, y + capY - yOffset, l.captionWide, capTall );
+		m_pSlider[i]->SetBounds( sx, y - yOffset, l.inlineSliderWide, l.sliderTall );
+		m_pSliderValue[i]->SetBounds( sx + l.inlineSliderWide + l.valueGap, y + MAX( 0, l.trackCenter - ( l.fontTall + 2 ) / 2 ) - yOffset, l.valueWide, l.fontTall + 2 );
+		return MAX( l.sliderTall, capY + capTall ) + l.rowGap;
+	}
+
+	int capTall = ExtraApplyWrapped( m_pSliderCaption[i], m_wszSliderCaption[i], wide ) + 2;
+	m_pSliderCaption[i]->SetBounds( x, y - yOffset, wide, capTall );
+	int sw = MAX( 40, wide - l.valueGap - l.valueWide );
+	m_pSlider[i]->SetBounds( x, y + capTall - yOffset, sw, l.sliderTall );
+	m_pSliderValue[i]->SetBounds( x + sw + l.valueGap, y + capTall + MAX( 0, l.trackCenter - ( l.fontTall + 2 ) / 2 ) - yOffset, l.valueWide, l.fontTall + 2 );
+	return capTall + l.sliderTall + l.rowGap;
+}
+
 int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 {
 	const int fontTall = ExtraFontTall( m_pRadarHeader->GetFont() );
@@ -294,29 +344,32 @@ int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 
 	y += LayoutCheckButton( m_pRadarLocked, m_wszRadarLocked, x, y - yOffset, wide ) + rowGap;
 
-	for ( int i = 0; i < NUM_SLIDERS; i++ )
-	{
-		if ( bInline )
-		{
-			int capTall = ExtraApplyWrapped( m_pSliderCaption[i], m_wszSliderCaption[i], captionWide - 6 ) + 2;
-			int capY = MAX( 0, trackCenter - capTall / 2 );
-			int sx = x + captionWide;
-			m_pSliderCaption[i]->SetBounds( x, y + capY - yOffset, captionWide, capTall );
-			m_pSlider[i]->SetBounds( sx, y - yOffset, inlineSliderWide, sliderTall );
-			m_pSliderValue[i]->SetBounds( sx + inlineSliderWide + valueGap, y + MAX( 0, trackCenter - ( fontTall + 2 ) / 2 ) - yOffset, valueWide, fontTall + 2 );
-			y += MAX( sliderTall, capY + capTall ) + rowGap;
-		}
-		else
-		{
-			int capTall = ExtraApplyWrapped( m_pSliderCaption[i], m_wszSliderCaption[i], wide ) + 2;
-			m_pSliderCaption[i]->SetBounds( x, y - yOffset, wide, capTall );
-			y += capTall;
-			int sw = MAX( 40, wide - valueGap - valueWide );
-			m_pSlider[i]->SetBounds( x, y - yOffset, sw, sliderTall );
-			m_pSliderValue[i]->SetBounds( x + sw + valueGap, y + MAX( 0, trackCenter - ( fontTall + 2 ) / 2 ) - yOffset, valueWide, fontTall + 2 );
-			y += sliderTall + rowGap;
-		}
-	}
+	SliderLayout_t sl;
+	sl.bInline = bInline;
+	sl.captionWide = captionWide;
+	sl.inlineSliderWide = inlineSliderWide;
+	sl.sliderTall = sliderTall;
+	sl.trackCenter = trackCenter;
+	sl.valueWide = valueWide;
+	sl.valueGap = valueGap;
+	sl.fontTall = fontTall;
+	sl.rowGap = rowGap;
+
+	for ( int i = 0; i < NUM_RADAR_SLIDERS; i++ )
+		y += LayoutSlider( i, sl, x, y, yOffset, wide );
+
+	// --- Crosshair ---
+	y += sectionGap - rowGap;
+	h = ExtraApplyWrapped( m_pXhairHeader, m_wszXhairHeader, wide );
+	m_pXhairHeader->SetBounds( x, y - yOffset, wide, h + 2 );
+	y += h + 2 + rowGap;
+
+	for ( int i = 0; i < NUM_XHAIR_CHECKS; i++ )
+		y += LayoutCheckButton( m_pXhairCheck[i], m_wszXhairCheck[i], x, y - yOffset, wide );
+	y += rowGap;
+
+	for ( int i = NUM_RADAR_SLIDERS; i < NUM_SLIDERS; i++ )
+		y += LayoutSlider( i, sl, x, y, yOffset, wide );
 
 	// --- Scoreboard ---
 	y += sectionGap - rowGap;
@@ -415,6 +468,8 @@ void COptionsSubExtra::OnResetData()
 	m_pRadarLocked->Reset();
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->Reset();
+	for ( int i = 0; i < NUM_XHAIR_CHECKS; i++ )
+		m_pXhairCheck[i]->Reset();
 	m_pShowClientMod->Reset();
 	m_pSmokeV34->Reset();
 
@@ -431,6 +486,8 @@ void COptionsSubExtra::OnApplyChanges()
 	m_pRadarLocked->ApplyChanges();
 	for ( int i = 0; i < NUM_SLIDERS; i++ )
 		m_pSlider[i]->ApplyChanges();
+	for ( int i = 0; i < NUM_XHAIR_CHECKS; i++ )
+		m_pXhairCheck[i]->ApplyChanges();
 	m_pShowClientMod->ApplyChanges();
 	m_pSmokeV34->ApplyChanges();
 

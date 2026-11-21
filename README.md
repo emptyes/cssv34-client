@@ -54,6 +54,9 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
   - `-rmlui` enables the experimental RmlUi interface (uisystem). Without it the UI is VGUI, as in v34.
   - `-gameuiproportionality` scales the menus with the screen resolution (useful on large screens).
     By default the main menu uses a fixed size font, as in v34.
+- **Crosshair.** Besides the classic settings there are `cl_crosshairgap`, `cl_crosshair_drawoutline`,
+  `cl_crosshair_outlinethickness` and `cl_crosshair_t` (T-style); they are also in Options > Extra.
+  All of them are client-side only.
 - **Console.** Repeated warnings (commands blocked from the server, missing server sounds, replicated cvars)
   are printed once; `developer 1` shows every occurrence.
 - **Demos** are recorded in the v34 format (demo protocol 3, network protocol 7), also when `record` is started
