@@ -599,6 +599,24 @@ void Cmd_Exec_f( const CCommand &args )
 		return;
 	}
 
+	// The map's pakfile is mounted at the head of the GAME search path, so a downloaded map
+	// could shadow a config the player execs from a bind (rates.cfg, buy.cfg, ...) and run
+	// its own commands with full client rights. Configs are never taken from a map.
+	{
+		char szRelative[ MAX_PATH ];
+		Q_snprintf( szRelative, sizeof( szRelative ), "cfg/%s", szFile );
+		Q_DefaultExtension( szRelative, ".cfg", sizeof( szRelative ) );
+
+		char szFullPath[ MAX_PATH ];
+		PathTypeQuery_t pathType = PATH_IS_NORMAL;
+		if ( g_pFileSystem->RelativePathToFullPath( szRelative, NULL, szFullPath, sizeof( szFullPath ), FILTER_NONE, &pathType ) &&
+			( pathType & PATH_IS_MAPPACKFILE ) )
+		{
+			Warning( "exec %s: the file is in the map's pakfile; configs from maps are not executed.\n", szFile );
+			return;
+		}
+	}
+
 	// 360 doesn't need to do costly existence checks
 	if ( IsPC() )
 	{
