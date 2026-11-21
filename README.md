@@ -57,6 +57,11 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
 - **Crosshair.** Besides the classic settings there are `cl_crosshairgap`, `cl_crosshair_drawoutline`,
   `cl_crosshair_outlinethickness` and `cl_crosshair_t` (T-style); they are also in Options > Extra.
   All of them are client-side only.
+- **HTML MOTD.** Off by default (`cl_disablehtmlmotd 1`: the text version is shown). When enabled in
+  Options > Extra, HTML pages are drawn inside the game by the Windows WebBrowser control, as in the original
+  v34 client; links that open a new window go to the system browser. The control is the IE11 engine,
+  so very modern pages may look off (the client sets IE11 mode for its executable in
+  `HKCU\...\FEATURE_BROWSER_EMULATION`).
 - **Console.** Repeated warnings (commands blocked from the server, missing server sounds, replicated cvars)
   are printed once; `developer 1` shows every occurrence.
 - **Demos** are recorded in the v34 format (demo protocol 3, network protocol 7), also when `record` is started

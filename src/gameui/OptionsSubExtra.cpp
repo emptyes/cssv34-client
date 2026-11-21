@@ -205,6 +205,13 @@ COptionsSubExtra::COptionsSubExtra( vgui::Panel *parent ) : PropertyPage( parent
 		g_pVGuiLocalize->ConvertANSIToUnicode( s_XhairChecks[i].caption, m_wszXhairCheck[i], sizeof( m_wszXhairCheck[i] ) );
 	}
 
+	// MOTD: cl_disablehtmlmotd lives in client.dll, the check box shows its inverse
+	m_pMotdHeader = new Label( this, "MotdHeader", EXTRA_STR_MOTD );
+	m_pMotdHTML = new CheckButton( this, "MotdHTML", EXTRA_STR_MOTD_HTML );
+	m_bMotdHTMLStart = false;
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_MOTD, m_wszMotdHeader, sizeof( m_wszMotdHeader ) );
+	g_pVGuiLocalize->ConvertANSIToUnicode( EXTRA_STR_MOTD_HTML, m_wszMotdHTML, sizeof( m_wszMotdHTML ) );
+
 	m_pScoreboardHeader = new Label( this, "ScoreboardHeader", EXTRA_STR_SB );
 	m_pShowClientMod = new CCvarToggleCheckButton( this, "ShowClientMod", EXTRA_STR_CM, "cl_scoreboard_show_clientmod" );
 
@@ -371,8 +378,16 @@ int COptionsSubExtra::LayoutContent( int x, int yOffset, int wide )
 	for ( int i = NUM_RADAR_SLIDERS; i < NUM_SLIDERS; i++ )
 		y += LayoutSlider( i, sl, x, y, yOffset, wide );
 
-	// --- Scoreboard ---
+	// --- MOTD ---
 	y += sectionGap - rowGap;
+	h = ExtraApplyWrapped( m_pMotdHeader, m_wszMotdHeader, wide );
+	m_pMotdHeader->SetBounds( x, y - yOffset, wide, h + 2 );
+	y += h + 2 + rowGap;
+
+	y += LayoutCheckButton( m_pMotdHTML, m_wszMotdHTML, x, y - yOffset, wide );
+
+	// --- Scoreboard ---
+	y += sectionGap;
 	h = ExtraApplyWrapped( m_pScoreboardHeader, m_wszScoreboardHeader, wide );
 	m_pScoreboardHeader->SetBounds( x, y - yOffset, wide, h + 2 );
 	y += h + 2 + rowGap;
@@ -478,6 +493,10 @@ void COptionsSubExtra::OnResetData()
 	m_bThreadedStart = cl_threaded_bone_setup.IsValid() && cl_threaded_bone_setup.GetBool() &&
 					   r_threaded_renderables.IsValid() && r_threaded_renderables.GetBool();
 	m_pThreaded->SetSelected( m_bThreadedStart );
+
+	ConVarRef cl_disablehtmlmotd( "cl_disablehtmlmotd", true );
+	m_bMotdHTMLStart = cl_disablehtmlmotd.IsValid() && !cl_disablehtmlmotd.GetBool();
+	m_pMotdHTML->SetSelected( m_bMotdHTMLStart );
 	UpdateValueLabels();
 }
 
@@ -501,6 +520,15 @@ void COptionsSubExtra::OnApplyChanges()
 		if ( r_threaded_renderables.IsValid() )
 			r_threaded_renderables.SetValue( bThreaded ? 1 : 0 );
 		m_bThreadedStart = bThreaded;
+	}
+
+	bool bMotdHTML = m_pMotdHTML->IsSelected();
+	if ( bMotdHTML != m_bMotdHTMLStart )
+	{
+		ConVarRef cl_disablehtmlmotd( "cl_disablehtmlmotd", true );
+		if ( cl_disablehtmlmotd.IsValid() )
+			cl_disablehtmlmotd.SetValue( bMotdHTML ? 0 : 1 );
+		m_bMotdHTMLStart = bMotdHTML;
 	}
 }
 

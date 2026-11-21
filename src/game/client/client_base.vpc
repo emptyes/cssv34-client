@@ -617,6 +617,8 @@ $Project
 			$File	"game_controls\SpectatorGUI.cpp"
 			$File	"game_controls\teammenu.cpp"
 			$File	"game_controls\vguitextwindow.cpp"
+			$File	"game_controls\ie_html_panel.cpp"
+			$File	"game_controls\ie_browser_win32.cpp"
 			$File	"game_controls\IconPanel.cpp"
 		}
 
@@ -1198,6 +1200,8 @@ $Project
 		$File	"game_controls\spectatorgui.h"
 		$File	"game_controls\teammenu.h"
 		$File	"game_controls\vguitextwindow.h"
+		$File	"game_controls\ie_html_panel.h"
+		$File	"game_controls\ie_browser_win32.h"
 		$File	"game_controls\IconPanel.h"
 	}
 	

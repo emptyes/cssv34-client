@@ -23,6 +23,8 @@
 #include <vgui_controls/Button.h>
 
 #include <game/client/iviewport.h>
+#include "steam/steam_api.h"
+#include "ie_html_panel.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -32,7 +34,7 @@ extern INetworkStringTable *g_pStringTableInfoPanel;
 
 #define TEMP_HTML_FILE	"textwindow_temp.html"
 
-ConVar cl_disablehtmlmotd( "cl_disablehtmlmotd", "1", FCVAR_ARCHIVE, "Disable HTML motds." );
+ConVar cl_disablehtmlmotd( "cl_disablehtmlmotd", "1", FCVAR_ARCHIVE, "Disable HTML motds (show their text version). Without Steam, HTML motds are drawn by the Windows WebBrowser control." );
 
 //=============================================================================
 // HPE_BEGIN:
@@ -103,6 +105,9 @@ CTextWindow::CTextWindow(IViewPort *pViewPort) : Frame(NULL, PANEL_INFO	)
 
 	m_pTextMessage = new TextEntry( this, "TextMessage" );
 	m_pHTMLMessage = new CMOTDHTML( this,"HTMLMessage" );
+	m_pBrowserMessage = new CIEHTMLPanel( this, "BrowserMessage" );
+	m_pBrowserMessage->SetVisible( false );
+	m_szBrowserURL[0] = '\0';
 	m_pTitleLabel  = new Label( this, "MessageTitle", "Message Title" );
 	m_pOK		   = new Button(this, "ok", "#PropertyDialog_OK");
 
@@ -160,6 +165,47 @@ void CTextWindow::ShowText( const char *text )
 	m_pTextMessage->GotoTextStart();
 }
 
+void CTextWindow::ShowFallbackText()
+{
+	// Show the text version of the MOTD
+	if ( g_pStringTableInfoPanel )
+	{
+		int index = g_pStringTableInfoPanel->FindStringIndex( "motd_text" );
+		if ( index != ::INVALID_STRING_INDEX )
+		{
+			int length = 0;
+			const char *data = (const char *)g_pStringTableInfoPanel->GetStringUserData( index, &length );
+			if ( data && data[0] )
+			{
+				m_pHTMLMessage->SetVisible( false );
+				m_pBrowserMessage->SetVisible( false );
+				ShowText( data );
+			}
+		}
+	}
+}
+
+bool CTextWindow::ShowURLWithBrowser( const char *URL )
+{
+	if ( !CIEHTMLPanel::IsAvailable() || !URL || !URL[0] )
+		return false;
+
+	// same place and size as the Steam HTML panel from TextWindow.res
+	int x, y, wide, tall;
+	m_pHTMLMessage->GetBounds( x, y, wide, tall );
+	m_pBrowserMessage->SetBounds( x, y, wide, tall );
+
+	if ( !m_pBrowserMessage->OpenURL( URL ) )
+		return false;
+
+	Q_strncpy( m_szBrowserURL, URL, sizeof( m_szBrowserURL ) );
+	m_pHTMLMessage->SetVisible( false );
+	m_pTextMessage->SetVisible( false );
+	m_pBrowserMessage->SetVisible( true );
+	m_bShownURL = true;
+	return true;
+}
+
 void CTextWindow::ShowURL( const char *URL, bool bAllowUserToDisable )
 {
 	#ifdef _DEBUG
@@ -172,23 +218,20 @@ void CTextWindow::ShowURL( const char *URL, bool bAllowUserToDisable )
 		Warning( "Blocking HTML info panel '%s'; Using plaintext instead.\n", URL );
 
 		// User has disabled HTML TextWindows. Show the fallback as text only.
-		if ( g_pStringTableInfoPanel )
-		{
-			int index = g_pStringTableInfoPanel->FindStringIndex( "motd_text" );
-			if ( index != ::INVALID_STRING_INDEX )
-			{
-				int length = 0;
-				const char *data = (const char *)g_pStringTableInfoPanel->GetStringUserData( index, &length );
-				if ( data && data[0] )
-				{
-					m_pHTMLMessage->SetVisible( false );
-					ShowText( data );
-				}
-			}
-		}
+		ShowFallbackText();
 		return;
 	} 
 
+	// Without Steam there is no HTML surface: draw the page with the Windows WebBrowser
+	// control instead (as the original v34 client did), or fall back to the text version.
+	if ( !steamapicontext || !steamapicontext->SteamHTMLSurface() )
+	{
+		if ( !ShowURLWithBrowser( URL ) )
+			ShowFallbackText();
+		return;
+	}
+
+	m_pBrowserMessage->SetVisible( false );
 	m_pHTMLMessage->SetVisible( true );
 	m_pHTMLMessage->OpenURL( URL, NULL );
 	m_bShownURL = true;
@@ -282,6 +325,8 @@ void CTextWindow::Update( void )
 
 	if ( m_pHTMLMessage )
 		m_pHTMLMessage->SetVisible( false );
+	m_pBrowserMessage->SetVisible( false );
+	m_szBrowserURL[0] = '\0';
 	m_pTextMessage->SetVisible( false );
 
 	if ( m_nContentType == TYPE_INDEX )
@@ -411,11 +456,18 @@ void CTextWindow::ShowPanel( bool bShow )
 	{
 		Activate();
 		SetMouseInputEnabled( true );
+
+		// the browser is destroyed while the panel is hidden; reopen its page
+		if ( m_szBrowserURL[0] && m_pBrowserMessage->IsVisible() && !m_pBrowserMessage->HasBrowser() )
+			m_pBrowserMessage->OpenURL( m_szBrowserURL );
 	}
 	else
 	{
 		SetVisible( false );
 		SetMouseInputEnabled( false );
+
+		// don't keep a hidden browser running scripts and holding memory
+		m_pBrowserMessage->CloseBrowser();
 
 		if ( m_bUnloadOnDismissal && m_bShownURL && m_pHTMLMessage )
 		{

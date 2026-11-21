@@ -23,6 +23,8 @@ namespace vgui
 	class TextEntry;
 }
 
+class CIEHTMLPanel;
+
 //-----------------------------------------------------------------------------
 // Purpose: displays the MOTD
 //-----------------------------------------------------------------------------
@@ -57,6 +59,10 @@ public:
 	virtual void ShowURL( const char *URL, bool bAllowUserToDisable = true );
 	virtual void ShowIndex( const char *entry );
 
+	// HTML MOTD without the Steam HTML surface (Windows WebBrowser control)
+	bool ShowURLWithBrowser( const char *URL );
+	void ShowFallbackText();
+
 	virtual void ApplySchemeSettings( vgui::IScheme *pScheme );
 
 	virtual GameActionSet_t GetPreferredActionSet() { return GAME_ACTION_SET_IN_GAME_HUD; }
@@ -88,6 +94,8 @@ protected:
 		virtual bool OnStartRequest( const char *url, const char *target, const char *pchPostData, bool bIsRedirect ) OVERRIDE;
 	};
 	CMOTDHTML		*m_pHTMLMessage;
+	CIEHTMLPanel	*m_pBrowserMessage;		// used instead of m_pHTMLMessage when Steam can't render HTML
+	char			m_szBrowserURL[2048];	// page shown in m_pBrowserMessage, reopened when the panel is shown again
 	
 	vgui::Button	*m_pOK;
 	vgui::Label		*m_pTitleLabel;
