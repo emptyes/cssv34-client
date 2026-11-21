@@ -36,6 +36,9 @@
 #pragma comment( lib, "advapi32.lib" )
 #endif
 
+#ifndef DISPID_DOCUMENTCOMPLETE
+#define DISPID_DOCUMENTCOMPLETE 259
+#endif
 #ifndef DISPID_NEWWINDOW3
 #define DISPID_NEWWINDOW3 273
 #endif
@@ -112,6 +115,7 @@ public:
 	bool Render( unsigned char *pRGBA, int nWide, int nTall );
 	void PostMouse( UINT msg, WPARAM wParam, int x, int y );
 	void Scroll( int nPixels );
+	void DisableDragging();
 
 	// IUnknown
 	STDMETHODIMP QueryInterface( REFIID riid, void **ppv );
@@ -195,6 +199,7 @@ private:
 	LONG				m_cRef;
 	HWND				m_hWnd;
 	int					m_nWide, m_nTall;
+	bool				m_bButtonDown;
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -216,6 +221,7 @@ CIEBrowserHost::CIEBrowserHost()
 	m_cRef = 1;
 	m_hWnd = NULL;
 	m_nWide = m_nTall = 0;
+	m_bButtonDown = false;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -304,6 +310,10 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 			pVarResult->vt = VT_I4;
 			pVarResult->lVal = DLCTL_DLIMAGES | DLCTL_SILENT | DLCTL_NO_DLACTIVEXCTLS | DLCTL_NO_RUNACTIVEXCTLS;
 		}
+		return S_OK;
+
+	case DISPID_DOCUMENTCOMPLETE:
+		DisableDragging();
 		return S_OK;
 
 	case DISPID_NEWWINDOW3:
@@ -589,6 +599,21 @@ HWND CIEBrowserHost::FindServerWindow()
 
 void CIEBrowserHost::PostMouse( UINT msg, WPARAM wParam, int x, int y )
 {
+	// The real button is held while these messages arrive, so moves between the press and
+	// the release make IE start dragging the link or image instead of clicking it.
+	if ( msg == WM_LBUTTONDOWN )
+		m_bButtonDown = true;
+	else if ( msg == WM_LBUTTONUP )
+		m_bButtonDown = false;
+	else if ( msg == WM_MOUSEMOVE && m_bButtonDown )
+	{
+		// released outside the panel: the panel doesn't get that release
+		int vkPrimary = GetSystemMetrics( SM_SWAPBUTTON ) ? VK_RBUTTON : VK_LBUTTON;
+		if ( GetAsyncKeyState( vkPrimary ) & 0x8000 )
+			return;
+		m_bButtonDown = false;
+	}
+
 	HWND hServer = FindServerWindow();
 	if ( hServer )
 		PostMessageW( hServer, msg, wParam, MAKELPARAM( x, y ) );
@@ -610,6 +635,39 @@ void CIEBrowserHost::Scroll( int nPixels )
 		if ( SUCCEEDED( pDoc->get_parentWindow( &pWindow ) ) && pWindow )
 		{
 			pWindow->scrollBy( 0, nPixels );
+			pWindow->Release();
+		}
+		pDoc->Release();
+	}
+	pDocDisp->Release();
+}
+
+// Pages can't be dragged inside the game: IE's drag and drop loop takes the real mouse.
+// Runs after every page load (the handler belongs to the document).
+void CIEBrowserHost::DisableDragging()
+{
+	if ( !m_pBrowser )
+		return;
+
+	IDispatch *pDocDisp = NULL;
+	if ( FAILED( m_pBrowser->get_Document( &pDocDisp ) ) || !pDocDisp )
+		return;
+
+	IHTMLDocument2 *pDoc = NULL;
+	if ( SUCCEEDED( pDocDisp->QueryInterface( IID_IHTMLDocument2, (void **)&pDoc ) ) && pDoc )
+	{
+		IHTMLWindow2 *pWindow = NULL;
+		if ( SUCCEEDED( pDoc->get_parentWindow( &pWindow ) ) && pWindow )
+		{
+			BSTR code = SysAllocString( L"document.ondragstart = function() { return false; };" );
+			BSTR lang = SysAllocString( L"JavaScript" );
+			VARIANT result;
+			VariantInit( &result );
+			if ( code && lang )
+				pWindow->execScript( code, lang, &result );	// fails silently if scripts are off
+			VariantClear( &result );
+			SysFreeString( code );
+			SysFreeString( lang );
 			pWindow->Release();
 		}
 		pDoc->Release();
