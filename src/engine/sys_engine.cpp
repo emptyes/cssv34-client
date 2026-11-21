@@ -275,7 +275,12 @@ bool CEngine::FilterTime( float dt )
 		}
 	}
 
+	// fps_max 0 means "unlimited", but not above MAX_FPS: host_frametime rounds frames
+	// shorter than MIN_FRAMETIME (1 ms) up, so above 1000 fps game time (movement on a
+	// listen server) runs faster than real time
 	float fps = fps_max.GetFloat();
+	if ( fps <= 0.0f )
+		fps = MAX_FPS;
 	if ( fps > 0.0f )
 	{
 		// Limit fps to withing tolerable range
