@@ -52,7 +52,8 @@ OVERLAY_BSP_FACE_COUNT, WATEROVERLAY_BSP_FACE_COUNT = 64, 256
 SURF_NOLIGHT, SURF_BUMPLIGHT = 0x0400, 0x0800
 NUM_BUMP_VECTS = 3
 MAXLIGHTMAPS = 4
-MAX_BRUSH_LIGHTMAP_DIM, MAX_DISP_LIGHTMAP_DIM = 32, 125
+# MSurf_MaxLightmapSizeWithBorder: the limits including the border
+MAX_BRUSH_LIGHTMAP_DIM, MAX_DISP_LIGHTMAP_DIM = 35, 128
 GAMELUMP_STATIC_PROPS = struct.unpack('>i', b'sprp')[0]
 GAMELUMP_DETAIL_PROPS = struct.unpack('>i', b'dprp')[0]
 DETAIL_PROP_TYPE_MODEL, DETAIL_PROP_TYPE_SPRITE = 0, 1
@@ -347,7 +348,7 @@ class Checker:
     def check_face_lighting(self, faces, light, name):
         """The engine drops the lightmap of faces whose samples are outside the lump."""
         dropped = 0
-        for f in faces:
+        for i, f in enumerate(faces):
             lightofs = f[12]
             styles = f[8:12]
             if lightofs == -1 or not light:
@@ -358,7 +359,8 @@ class Checker:
             if not flags & SURF_NOLIGHT:
                 limit = MAX_DISP_LIGHTMAP_DIM if f[6] != -1 else MAX_BRUSH_LIGHTMAP_DIM
                 if extents[0] > limit or extents[1] > limit:
-                    self.fail('bad lightmap extents (the engine quits with "Bad surface extents")')
+                    self.fail('bad lightmap extents %dx%d in %s face %d (the engine quits with "Bad surface extents")'
+                              % (extents[0], extents[1], name, i))
             luxels = (extents[0] + 1) * (extents[1] + 1)
             if flags & SURF_BUMPLIGHT and not flags & SURF_NOLIGHT:
                 luxels *= NUM_BUMP_VECTS + 1
