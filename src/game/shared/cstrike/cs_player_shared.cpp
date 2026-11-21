@@ -686,8 +686,10 @@ void CCSPlayer::UpdateStepSound( surfacedata_t *psurface, const Vector &vecOrigi
 {
 	float speedSqr = vecVelocity.AsVector2D().LengthSqr();
 
-	// the fastest walk is 135 ( scout ), see CCSGameMovement::CheckParameters()
-	if ( speedSqr < 150.0 * 150.0 ) 
+	// v34: silent below 110 u/s (walking is 100, see CCSGameMovement::CheckParameters()).
+	// Later Source used 150, which also muted accelerating/stopping players at 110-150 u/s;
+	// other players' footsteps are generated client side, so this decides what you hear.
+	if ( speedSqr < 110.0f * 110.0f )
 		return; // player is not running, no footsteps
 
 	BaseClass::UpdateStepSound( psurface, vecOrigin, vecVelocity  );
