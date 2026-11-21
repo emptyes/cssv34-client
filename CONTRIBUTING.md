@@ -119,9 +119,18 @@ Large pull requests that mix unrelated changes may be requested to split.
 
 ---
 
+## Commits
+
+All commits should follow [Conventional Commits](conventionalcommits.org) commit style
+Example:
+fix(engine): fixed split packet compression
+feat(voice): added ClientMod voice support
+
+---
+
 ## Testing
 
-Start with the [build guide](.github/docs/building-engine.md) for prerequisites and the Linux core-library compilation check. That check is not a unit-test run or a full client build; report unverified runtime checks explicitly.
+Start with the [build guide](BUILDING.md) for prerequisites and the Linux core-library compilation check. That check is not a unit-test run or a full client build; report unverified runtime checks explicitly.
 
 For changes affecting the client, verify that:
 
