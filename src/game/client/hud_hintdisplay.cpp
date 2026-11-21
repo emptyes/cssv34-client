@@ -495,20 +495,15 @@ bool CHudHintKeyDisplay::SetHintText( const char *text )
 		}
 
 		// parse out the string
+		// the text can come from the server: an over-long part is truncated, not overflowed
 		wchar_t *end = wcschr( ws, '%' );
-		if ( end )
-		{
-			wcsncpy( token, ws, MIN( end - ws, ARRAYSIZE(token)) );
-			token[end - ws] = L'\0';	// force null termination
-		}
-		else
-		{
-			wcsncpy( token, ws, ARRAYSIZE(token) );
-			token[ ARRAYSIZE(token) - 1 ] = L'\0';	// force null termination
-		}
+		int len = end ? (int)( end - ws ) : (int)wcslen( ws );
+		int copylen = MIN( len, (int)ARRAYSIZE(token) - 1 );
+		wcsncpy( token, ws, copylen );
+		token[copylen] = L'\0';
 
-		ws += wcslen( token );
-		if ( isVar )
+		ws += len;
+		if ( isVar && *ws )
 		{
 			// move over the end of the variable
 			++ws; 

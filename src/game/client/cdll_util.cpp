@@ -892,9 +892,24 @@ const char * UTIL_SafeName( const char *oldName )
 //			input buffer is assumed, or you can pass the size of the input buffer if
 //			not NULL-terminated.
 //-----------------------------------------------------------------------------
+//			The text can come from the server (HintText, KeyHintText), so the token
+//			and the output are bounded: an over-long %token% is truncated and the
+//			output is cut at outbufsizebytes.
+static void ReplaceKeyBindings_Append( wchar_t *outbuf, int &pos, int maxchars, const wchar_t *text )
+{
+	while ( *text && pos < maxchars )
+	{
+		outbuf[pos++] = *text++;
+	}
+}
+
 void UTIL_ReplaceKeyBindings( const wchar_t *inbuf, int inbufsizebytes, OUT_Z_BYTECAP(outbufsizebytes) wchar_t *outbuf, int outbufsizebytes )
 {
 	Assert( outbufsizebytes >= sizeof(outbuf[0]) );
+	const int maxchars = outbufsizebytes / (int)sizeof( outbuf[0] ) - 1;
+	if ( maxchars < 0 )
+		return;
+
 	// copy to a new buf if there are vars
 	outbuf[0]=0;
 
@@ -908,19 +923,22 @@ void UTIL_ReplaceKeyBindings( const wchar_t *inbuf, int inbufsizebytes, OUT_Z_BY
 		inbufend = inbuf + ( inbufsizebytes / 2 );
 	}
 
-	while( inbuf != inbufend && *inbuf != 0 )
+	while( ( !inbufend || inbuf < inbufend ) && *inbuf != 0 && pos < maxchars )
 	{
 		// check for variables
 		if ( *inbuf == '%' )
 		{
 			++inbuf;
+			if ( *inbuf == 0 || inbuf == inbufend )
+				break;	// a trailing '%'
 
 			const wchar_t *end = wcschr( inbuf, '%' );
 			if ( end && ( end != inbuf ) ) // make sure we handle %% in the string, which should be treated in the output as %
 			{
 				wchar_t token[64];
-				wcsncpy( token, inbuf, end - inbuf );
-				token[end - inbuf] = 0;
+				int tokenlen = MIN( (int)( end - inbuf ), (int)ARRAYSIZE( token ) - 1 );
+				wcsncpy( token, inbuf, tokenlen );
+				token[tokenlen] = 0;
 
 				inbuf += end - inbuf;
 
@@ -959,26 +977,15 @@ void UTIL_ReplaceKeyBindings( const wchar_t *inbuf, int inbufsizebytes, OUT_Z_BY
 				if ( !locName || wcslen(locName) <= 0)
 				{
 					g_pVGuiLocalize->ConvertANSIToUnicode( friendlyName, token, sizeof(token) );
-
-					outbuf[pos] = '\0';
-					wcscat( outbuf, token );
-					pos += wcslen(token);
+					ReplaceKeyBindings_Append( outbuf, pos, maxchars, token );
 				}
 				else
 				{
-					outbuf[pos] = '\0';
 					if ( bAddBrackets )
-					{
-						wcscat( outbuf, L"[" );
-						pos += 1;
-					}
-					wcscat( outbuf, locName );
-					pos += wcslen(locName);
+						ReplaceKeyBindings_Append( outbuf, pos, maxchars, L"[" );
+					ReplaceKeyBindings_Append( outbuf, pos, maxchars, locName );
 					if ( bAddBrackets )
-					{
-						wcscat( outbuf, L"]" );
-						pos += 1;
-					}
+						ReplaceKeyBindings_Append( outbuf, pos, maxchars, L"]" );
 				}
 			}
 			else
