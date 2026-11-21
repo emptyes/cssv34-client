@@ -44,7 +44,7 @@ extern ConVar sv_lan;
 #define LAN_LAST_PORT 27020
 
 // Built-in master server, always queried in addition to cfg/MasterServers.vdf
-#define DEFAULT_MASTER_SERVER "144.31.238.180:27011"
+#define DEFAULT_MASTER_SERVER "144.31.238.180:10205"
 #define MASTER_SERVERS_FILE "cfg/MasterServers.vdf"
 #define MAX_MASTER_SERVERS 16
 
@@ -53,8 +53,6 @@ extern ConVar sv_lan;
 #else
 #define IsLan() sv_lan.GetInt()
 #endif
-
-#define MASTER_SERVER "144.31.238.180:10205"
 
 //-----------------------------------------------------------------------------
 // Purpose: Implements the master server interface
