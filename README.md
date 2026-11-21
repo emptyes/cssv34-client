@@ -28,15 +28,17 @@ Releases can be found [here](https://github.com/sl1mshady-cs/cssv34-client/relea
 ---
 
 # Contributing
-Read [CONTRIBUTING.md](https://github.com/sl1mshady-cs/cssv34-client/blob/master/CONTRIBUTING.md)
+Read [CONTRIBUTING.md](CONTRIBUTING.md)
 
 # How to Build?
 
-Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/master/BUILDING.md)
+Start with the [Build Instructions](BUILDING.md): clone commands, prerequisites, and a Linux core-library smoke build. Full client builds have separate dependencies. See the [onboarding audit](onboarding-audit.md) for the verification record.
 
 ---
 
 # How to Run?
+
+These launcher steps require a **full Windows client build**, not the Linux core-library smoke build. Compilation does not include game content.
 
 - Content can be downloaded from releases tab: [Game and Dedicated Server Content](https://github.com/sl1mshady-cs/cssv34-client/releases/tag/content-v1.0)
 - Unpack this content into the output folder that you configurated.

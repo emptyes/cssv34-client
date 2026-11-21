@@ -371,9 +371,9 @@ MigrationBackup/
 FodyWeavers.xsd
 /game
 /src/build
-/src/waf3-*/
-/src/.waf3-*/
-/src/.lock-waf_*
+/src/waf*/
+/src/.waf*/
+/src/.lock-waf*
 
 # Excludes
 !/game/readme.txt
