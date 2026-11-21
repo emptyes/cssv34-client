@@ -10,6 +10,7 @@
 #include "cdll_bounded_cvars.h"
 #include "convar_serverbounded.h"
 #include "tier0/icommandline.h"
+#include "v34_interp.h"
 
 
 bool g_bForceCLPredictOff = false;
@@ -68,7 +69,7 @@ public:
 	  ConVar_ServerBounded( "cl_interp_ratio", 
 		  "2.0", 
 		  FCVAR_USERINFO | FCVAR_ARCHIVE /* | FCVAR_NOT_CONNECTED*/,
-		  "Sets the interpolation amount (final amount is cl_interp_ratio / cl_updaterate). Used only when cl_interp is 0." )
+		  "Sets the interpolation amount (final amount is cl_interp_ratio / cl_updaterate, as v34 servers compute it for lag compensation)." )
 	  {
 	  }
 
@@ -102,7 +103,7 @@ public:
 	  ConVar_ServerBounded( "cl_interp", 
 		  "0.1", 
 		  FCVAR_USERINFO | FCVAR_ARCHIVE /* | FCVAR_NOT_CONNECTED*/,
-		  "Sets the interpolation amount (bounded on low side by server interp ratio settings).", true, 0.0f, true, 0.5f )
+		  "Not used: v34 servers ignore it, the interpolation amount is cl_interp_ratio / cl_updaterate. Kept for configs and server cvar queries.", true, 0.0f, true, 0.5f )
 	  {
 	  }
 
@@ -124,10 +125,10 @@ public:
 static CBoundedCvar_Interp cl_interp_var;
 ConVar_ServerBounded *cl_interp = &cl_interp_var;
 
-// v34 servers don't send sv_client_min_interp_ratio, so cl_interp 0 / cl_interp_ratio 1-2 (10-20 ms) is allowed.
+// v34 servers don't send sv_client_min_interp_ratio, so cl_interp_ratio 1-2 / cl_updaterate 100 (10-20 ms) is allowed.
 // That is too little to smoothly watch another player: the camera jerks back for a frame. While spectating
 // we don't shoot, so a bigger interpolation costs nothing.
-static ConVar cl_spec_interp( "cl_spec_interp", "0.1", FCVAR_ARCHIVE, "Minimum interpolation amount while spectating (dead/spectator), 0 = use cl_interp.", true, 0.0f, true, 0.5f );
+static ConVar cl_spec_interp( "cl_spec_interp", "0.1", FCVAR_ARCHIVE, "Minimum interpolation amount while spectating (dead/spectator), 0 = same as alive.", true, 0.0f, true, 0.5f );
 
 static float GetSpectatorInterpAmount( float flInterp )
 {
@@ -143,18 +144,20 @@ static float GetSpectatorInterpAmount( float flInterp )
 
 float GetClientInterpAmount()
 {
+	// Same lerp time the v34 server uses for lag compensation (see v34_interp.h).
+	// The update rate is clamped here explicitly: cl_updaterate lives in the engine and
+	// is reached through a plain ConVar pointer, so GetFloat() would return the raw
+	// value, not the one bounded by the server's sv_min/maxupdaterate.
 	static const ConVar *pUpdateRate = g_pCVar->FindVar( "cl_updaterate" );
+	static const ConVar *pMinUpdateRate = g_pCVar->FindVar( "sv_minupdaterate" );
+	static const ConVar *pMaxUpdateRate = g_pCVar->FindVar( "sv_maxupdaterate" );
 	if ( pUpdateRate )
 	{
-		// v34 servers know nothing about cl_interp_ratio: lag compensation rewinds by the
-		// raw "cl_interp" userinfo value. If the client rendered with a different amount
-		// (e.g. MAX(cl_interp, ratio/updaterate)) the server would rewind players to the
-		// wrong position -> shots that hit on screen don't register.
-		// So when cl_interp is set (> 0) use exactly that, like the original v34 client.
-		float flInterp = cl_interp->GetFloat();
-		if ( flInterp <= 0.0f )
-			flInterp = cl_interp_ratio->GetFloat() / pUpdateRate->GetFloat();
-		return GetSpectatorInterpAmount( flInterp );
+		int nUpdateRate = pUpdateRate->GetInt();
+		if ( pMinUpdateRate && pMaxUpdateRate )
+			nUpdateRate = clamp( nUpdateRate, (int)pMinUpdateRate->GetFloat(), (int)pMaxUpdateRate->GetFloat() );
+
+		return GetSpectatorInterpAmount( V34_GetLerpTime( cl_interp_ratio->GetFloat(), nUpdateRate ) );
 	}
 	else
 	{

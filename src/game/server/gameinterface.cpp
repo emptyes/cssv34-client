@@ -148,6 +148,8 @@ CSteamGameServerAPIContext *steamgameserverapicontext = &s_SteamGameServerAPICon
 
 IUploadGameStats *gamestatsuploader = NULL;
 
+#include "v34_interp.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -2837,7 +2839,6 @@ void CServerGameClients::ClientSettingsChanged( edict_t *pEdict )
 		float flLerpRatio = Q_atof( QUICKGETCVARVALUE("cl_interp_ratio") );
 		if ( flLerpRatio == 0 )
 			flLerpRatio = 1.0f;
-		float flLerpAmount = Q_atof( QUICKGETCVARVALUE("cl_interp") );
 
 		static const ConVar *pMin = g_pCVar->FindVar( "sv_client_min_interp_ratio" );
 		static const ConVar *pMax = g_pCVar->FindVar( "sv_client_max_interp_ratio" );
@@ -2850,8 +2851,8 @@ void CServerGameClients::ClientSettingsChanged( edict_t *pEdict )
 			if ( flLerpRatio == 0 )
 				flLerpRatio = 1.0f;
 		}
-		// #define FIXME_INTERP_RATIO
-		player->m_fLerpTime = MAX( flLerpAmount, flLerpRatio / player->m_nUpdateRate );
+		// v34: cl_interp is not used, see v34_interp.h. The client renders with the same amount.
+		player->m_fLerpTime = V34_GetLerpTime( flLerpRatio, player->m_nUpdateRate );
 	}
 	else
 	{

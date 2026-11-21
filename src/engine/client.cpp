@@ -50,6 +50,7 @@
 
 #include "tier0/platform.h"
 #include "tier0/systeminformation.h"
+#include "v34_interp.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -622,8 +623,13 @@ float CClientState::GetFrameTime() const
 	}
 }
 
+extern ConVar sv_minupdaterate;
+extern ConVar sv_maxupdaterate;
+
 float CClientState::GetClientInterpAmount()
 {
+	// Same lerp time the v34 server uses for lag compensation (see v34_interp.h), so
+	// temp entities fire in sync with the players client.dll renders.
 	// we need client cvar cl_interp_ratio
 	static const ConVar *s_cl_interp_ratio = NULL;
 	if ( !s_cl_interp_ratio )
@@ -632,22 +638,15 @@ float CClientState::GetClientInterpAmount()
 		if ( !s_cl_interp_ratio )
 			return 0.1f;
 	}
-	static const ConVar *s_cl_interp = NULL;
-	if ( !s_cl_interp )
-	{
-		s_cl_interp = g_pCVar->FindVar( "cl_interp" );
-		if ( !s_cl_interp )
-			return 0.1f;
-	}
-		
-	float flInterpRatio = s_cl_interp_ratio->GetFloat();
-	float flInterp = s_cl_interp->GetFloat();
 
+	// bounded by sv_client_min/max_interp_ratio, like the server does when it has them
 	const ConVar_ServerBounded *pBounded = static_cast<const ConVar_ServerBounded*>( s_cl_interp_ratio );
-	if ( pBounded )
-		flInterpRatio = pBounded->GetFloat();
-	//#define FIXME_INTERP_RATIO
-	return max( flInterpRatio / cl_updaterate->GetFloat(), flInterp );
+	float flInterpRatio = pBounded->GetFloat();
+
+	// the server Q_atoi's cl_updaterate and clamps it by its sv_min/maxupdaterate
+	int nUpdateRate = clamp( (int)cl_updaterate->GetBaseFloatValue(), (int)sv_minupdaterate.GetFloat(), (int)sv_maxupdaterate.GetFloat() );
+
+	return V34_GetLerpTime( flInterpRatio, nUpdateRate );
 }
 
 //-----------------------------------------------------------------------------
