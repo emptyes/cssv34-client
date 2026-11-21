@@ -9,6 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  # Fast compile check of the whole tree with GCC. Runs in parallel with the Windows
+  # build and doesn't gate it: it only reports compile errors minutes earlier.
+  check-linux-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends g++ pkg-config libsdl2-dev libfreetype-dev \
+          libfontconfig-dev libopenal-dev libjpeg-dev libpng-dev libcurl4-gnutls-dev libbz2-dev libedit-dev
+
+    - name: Build linux-amd64 (release)
+      run: |
+        cd src
+        python3 waf configure -T release --disable-warns --build-games=cstrike
+        python3 waf build -j"$(nproc)"
+
   build-windows-amd64:
     permissions:
       contents: write
@@ -30,6 +53,8 @@ jobs:
     - name: Rebuild libjpeg, libpng, speex for LTO
       shell: pwsh
       run: |
+        cd src
+
         $ErrorActionPreference = 'Stop'
         $root = $PWD.Path
         $out  = "$root\lib\win32\amd64"
@@ -66,7 +91,8 @@ jobs:
     - name: Build windows-amd64 (release)
       shell: pwsh
       run: |
-        python waf configure -T release --enable-lto --enable-speex --enable-opus --build-games=cstrike --prefix=./win64_build
+        cd src
+        python waf configure -T release --enable-lto --enable-speex --enable-opus --build-games=cstrike --prefix=../win64_build
         if ($LASTEXITCODE -ne 0) { throw "waf configure failed" }
         python waf install
         if ($LASTEXITCODE -ne 0) { throw "waf install failed" }
@@ -74,14 +100,30 @@ jobs:
     - name: Pack game and debug symbols
       shell: pwsh
       run: |
+        cd src
+
         New-Item -ItemType Directory -Force pdb | Out-Null
-        $names = Get-ChildItem win64_build -Recurse -Include *.dll,*.exe | ForEach-Object { $_.BaseName }
+        $names = Get-ChildItem ../win64_build -Recurse -Include *.dll,*.exe | ForEach-Object { $_.BaseName }
         Get-ChildItem build -Recurse -Filter *.pdb | Where-Object { $names -contains $_.BaseName } | ForEach-Object { Copy-Item $_.FullName pdb\ -Force }
         Get-ChildItem pdb | Format-Table Name, Length
         7z a -mx9 cssv34_win64_pdb.7z .\pdb\*
         if ($LASTEXITCODE -ne 0) { throw "7z pdb failed" }
-        7z a -tzip cssv34_win64_optimized.zip .\win64_build\*
+        # debug symbols ship separately in cssv34_win64_pdb.7z
+        7z a -tzip cssv34_win64_optimized.zip ..\win64_build\* '-xr!*.pdb'
         if ($LASTEXITCODE -ne 0) { throw "7z game failed" }
+
+        cd ..
+
+    # Builds of other branches are not released: keep them downloadable from the run page
+    - name: Upload build
+      uses: actions/upload-artifact@v4
+      with:
+        name: cssv34_win64_${{ github.sha }}
+        path: |
+          src/cssv34_win64_optimized.zip
+          src/cssv34_win64_pdb.7z
+        if-no-files-found: error
+        retention-days: 14
 
     - name: Publish release
       if: github.ref == 'refs/heads/master'
@@ -92,5 +134,5 @@ jobs:
         target_commitish: ${{ github.sha }}
         fail_on_unmatched_files: true
         files: |
-          cssv34_win64_optimized.zip
-          cssv34_win64_pdb.7z
+          src/cssv34_win64_optimized.zip
+          src/cssv34_win64_pdb.7z

@@ -12,7 +12,7 @@ Releases can be found [here](https://github.com/sl1mshady-cs/cssv34-client/relea
 ---
 
 # Features:
-- Android (armeabi-v7a), Windows (x86, x64), Linux (i386, amd64) support
+- Android (arm64-v8a, armeabi-v7a), Windows (x86, x64), Linux (i386, amd64; **not tested**) support
 - Modern toolchains support
 - Fixed many undefined behaviours
 - Touch support( even on windows/linux/osx )
@@ -32,16 +32,32 @@ Read [CONTRIBUTING.md](https://github.com/sl1mshady-cs/cssv34-client/blob/master
 
 # How to Build?
 
-Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/master/.github/docs/building-engine.md)
+Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/master/BUILDING.md)
 
 ---
 
 # How to Run?
 
-- You need to download content. Download it from: [here](https://drive.google.com/file/d/1wzovBhjmJ_mDTpS3Lq89x57zhHTykgcN/view)
+- Content can be downloaded from releases tab: [Game and Dedicated Server Content](https://github.com/sl1mshady-cs/cssv34-client/releases/tag/content-v1.0)
 - Unpack this content into the output folder that you configurated.
 - Run hl2_launcher.exe with `-game cstrike` (you can create .bat file for it)
 - Or run css_launcher.exe: it starts the game with launch options (display mode, resolution, RmlUi, etc.) saved in css_launcher.ini
+
+## Playing on v34 servers
+- **Interpolation.** v34 servers rewind players for lag compensation by `cl_interp_ratio / cl_updaterate`
+  (the update rate clamped by the server's `sv_minupdaterate`/`sv_maxupdaterate`); `cl_interp` is not used by them.
+  The client renders other players with exactly that amount, so `cl_interp` has no effect on interpolation either.
+  The resulting value is shown as `lerp` in `net_graph 1` (e.g. `cl_interp_ratio 1` + `cl_updaterate 66` = 15.2 ms).
+- **Server list.** The built-in master server is always queried; more can be added in `cfg/MasterServers.vdf`
+  (original format). Favorites, history and LAN tabs work without Steam.
+- **Launch options:**
+  - `-rmlui` enables the experimental RmlUi interface (uisystem). Without it the UI is VGUI, as in v34.
+  - `-gameuiproportionality` scales the menus with the screen resolution (useful on large screens).
+    By default the main menu uses a fixed size font, as in v34.
+- **Console.** Repeated warnings (commands blocked from the server, missing server sounds, replicated cvars)
+  are printed once; `developer 1` shows every occurrence.
+- **Demos** are recorded in the v34 format (demo protocol 3, network protocol 7), also when `record` is started
+  in the middle of a round. `src/devtools/check_demo.py <file.dem>` checks the structure of a demo.
 
 ---
 
