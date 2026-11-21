@@ -9,6 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  # Fast compile check of the whole tree with GCC. Runs in parallel with the Windows
+  # build and doesn't gate it: it only reports compile errors minutes earlier.
+  check-linux-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends g++ pkg-config libsdl2-dev libfreetype-dev \
+          libfontconfig-dev libopenal-dev libjpeg-dev libpng-dev libcurl4-gnutls-dev libbz2-dev libedit-dev
+
+    - name: Build linux-amd64 (release)
+      run: |
+        cd src
+        python3 waf configure -T release --disable-warns --build-games=cstrike
+        python3 waf build -j"$(nproc)"
+
   build-windows-amd64:
     permissions:
       contents: write

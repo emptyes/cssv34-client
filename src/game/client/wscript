@@ -80,6 +80,12 @@ def build(bld):
 
 	defines.remove('PROTECTED_THINGS_ENABLE')
 
+	# libstdc++'s <cstring> #undefs strncpy and then does "using ::strncpy", which breaks
+	# when string.h was already read with strncpy renamed (RmlUi headers include <cstring>).
+	# The rename is only a guard against using strncpy; MSVC keeps it.
+	if bld.env.COMPILER_CC != 'msvc':
+		defines = [d for d in defines if d != 'strncpy=use_Q_strncpy_instead']
+
 	bld.shlib(
 		source   = source,
 		target   = PROJECT_NAME,
