@@ -116,6 +116,10 @@ void CBaseCombatCharacter::RemoveAmmo( int iCount, int iAmmoIndex )
 	if (iCount <= 0)
 		return;
 
+	// the index comes from the weapon's networked ammo type: don't trust it
+	if ( iAmmoIndex < 0 || iAmmoIndex >= MAX_AMMO_SLOTS )
+		return;
+
 	// Infinite ammo?
 	if ( GetAmmoDef()->MaxCarry( iAmmoIndex ) == INFINITE_AMMO )
 		return;
@@ -146,6 +150,9 @@ void CBaseCombatCharacter::RemoveAllAmmo( )
 void CBaseCombatCharacter::SetAmmoCount( int iCount, int iAmmoIndex )
 {
 	// NOTE: No sound, no max check! Seems pretty bogus to me!
+	if ( iAmmoIndex < 0 || iAmmoIndex >= MAX_AMMO_SLOTS )
+		return;
+
 	m_iAmmo.Set( iAmmoIndex, iCount );
 }
 
@@ -157,7 +164,8 @@ void CBaseCombatCharacter::SetAmmoCount( int iCount, int iAmmoIndex )
 //-----------------------------------------------------------------------------
 int CBaseCombatCharacter::GetAmmoCount( int iAmmoIndex ) const
 {
-	if ( iAmmoIndex == -1 )
+	// -1 is "no ammo"; other out of range values can come from a networked ammo type
+	if ( iAmmoIndex < 0 || iAmmoIndex >= MAX_AMMO_SLOTS )
 		return 0;
 
 	// Infinite ammo?
