@@ -235,8 +235,8 @@ void CWeaponGlock::FireRemaining( int &shotsFired, float &shootTime )
 		GetWeaponID(),
 		Secondary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255, // wrap it for network traffic so it's the same between client and server
-		GetInaccuracy(),
-		0.05 );
+		0.0f,		// v34: the remaining burst shots use a fixed 0.05 spread, the accuracy formula is not applied
+		0.05f );
 	
 	/*
 	#if defined( CLIENT_WEAPONS )
@@ -337,7 +337,7 @@ void CWeaponGlock::GlockFire( float flSpread, bool bFireBurst )
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255, // wrap it for network traffic so it's the same between client and server
-		GetInaccuracy(),
+		0.0f,		// v34 fires with flSpread alone, computed before m_flAccuracy was updated above
 		flSpread );
 
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + flCycleTime;

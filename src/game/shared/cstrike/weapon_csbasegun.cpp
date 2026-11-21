@@ -89,11 +89,15 @@ void CWeaponCSBaseGun::PrimaryAttack()
 	Assert( false );
 }
 
-bool CWeaponCSBaseGun::CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode )
+bool CWeaponCSBaseGun::CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode, float flSpread )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return false;
+
+	// must be taken before the m_flAccuracy update below (see the declaration)
+	if ( flSpread < 0.0f )
+		flSpread = GetInaccuracy();
 
 	const CCSWeaponInfo &pCSInfo = GetCSWpnData();
 
@@ -153,7 +157,7 @@ bool CWeaponCSBaseGun::CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode
 		GetWeaponID(),
 		weaponMode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		GetInaccuracy(),
+		flSpread,
 		GetSpread(), 
 		flCurAttack );
 

@@ -115,6 +115,9 @@ void CWeaponP228::PrimaryAttack( void )
 	if ( !pPlayer )
 		return;
 
+	// v34 computes the spread from the accuracy before this shot updates it
+	const float flSpread = GetInaccuracy();
+
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
 	m_flAccuracy -= (0.3)*(0.325 - (gpGlobals->curtime - m_flLastFire));
 
@@ -157,8 +160,8 @@ void CWeaponP228::PrimaryAttack( void )
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		GetInaccuracy(),
-		GetSpread());
+		flSpread,
+		0.0f);
 	
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + GetCSWpnData().m_flCycleTime;
 

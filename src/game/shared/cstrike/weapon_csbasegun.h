@@ -40,7 +40,10 @@ public:
 	virtual void WeaponIdle();
 
 	// Derived classes call this to fire a bullet.
-	bool CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode );
+	// flSpread < 0: the spread is GetInaccuracy() taken before this shot updates m_flAccuracy,
+	// as the v34 weapons computed it before calling CSBaseGunFire. Weapons that change their
+	// accuracy before the call pass the spread computed beforehand.
+	bool CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode, float flSpread = -1.0f );
 
 	// Usually plays the shot sound. Guns with silencers can play different sounds.
 	virtual void DoFireEffects();

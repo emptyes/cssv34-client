@@ -274,29 +274,23 @@ void FX_FireBullets(
 	lagcompensation->StartLagCompensation( pPlayer, pPlayer->GetCurrentCommand() );
 #endif
 
-	RandomSeed( iSeed );	// init random system with this seed
-
-	// Get accuracy displacement
-	float fTheta0 = RandomFloat(0.0f, 2.0f * M_PI);
-	float fRadius0 = RandomFloat(0.0f, fInaccuracy);
-	float x0 = fRadius0 * cosf(fTheta0);
-	float y0 = fRadius0 * sinf(fTheta0);
-
-	const int kMaxBullets = 16;
-	float x1[kMaxBullets], y1[kMaxBullets];
-	Assert(pWeaponInfo->m_iBullets <= kMaxBullets);
-
-	// the RNG can be desynchronized by FireBullet(), so pre-generate all spread offsets
-	for ( int iBullet=0; iBullet < pWeaponInfo->m_iBullets; iBullet++ )
-	{
-		float fTheta1 = RandomFloat(0.0f, 2.0f * M_PI);
-		float fRadius1 = RandomFloat(0.0f, fSpread);
-		x1[iBullet] = fRadius1 * cosf(fTheta1);
-		y1[iBullet] = fRadius1 * sinf(fTheta1);
-	}
+	// v34 bullet spread (weapon_accuracy_model 1 is the only allowed model). The v34 server
+	// and its TE_FireBullets carry one spread value: here it is fInaccuracy (the v34 per-weapon
+	// formula from GetInaccuracy) for local shots and fSpread (m_flSpread of the temp entity)
+	// for other players' shots, the other term is 0. Each bullet reseeds the shared random
+	// stream and gets a "circular gaussian" offset of two uniform randoms per axis, exactly
+	// like the server does, so the predicted impacts land where the server's bullets go.
+	const float flSpread = fInaccuracy + fSpread;
 
 	for ( int iBullet=0; iBullet < pWeaponInfo->m_iBullets; iBullet++ )
 	{
+		RandomSeed( iSeed );	// init random system with this seed
+
+		float x = RandomFloat( -0.5f, 0.5f ) + RandomFloat( -0.5f, 0.5f );
+		float y = RandomFloat( -0.5f, 0.5f ) + RandomFloat( -0.5f, 0.5f );
+
+		iSeed++; // use new seed for next bullet
+
 		pPlayer->FireBullet(
 			vOrigin,
 			vAngles,
@@ -307,7 +301,7 @@ void FX_FireBullets(
 			flRangeModifier,
 			pPlayer,
 			bDoEffects,
-			x0 + x1[iBullet], y0 + y1[iBullet] );
+			x * flSpread, y * flSpread );
 	}
 
 #if !defined (CLIENT_DLL)

@@ -152,7 +152,7 @@ void CWeaponFamas::FireRemaining( int &shotsFired, float &shootTime )
 		GetWeaponID(),
 		Secondary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		GetInaccuracy(),
+		0.0f,		// v34: the remaining burst shots use the spread of the first one alone
 		m_fBurstSpread );
 	
 
@@ -222,7 +222,7 @@ void CWeaponFamas::FamasFire( float flSpread , bool bFireBurst )
 		flSpread += 0.01;
 	}
 
-	if ( !CSBaseGunFire( flCycleTime, Primary_Mode ) )
+	if ( !CSBaseGunFire( flCycleTime, Primary_Mode, flSpread ) )
 		return;
 	
 	if ( pPlayer->GetAbsVelocity().Length2D() > 5 )

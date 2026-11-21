@@ -340,7 +340,7 @@ void CWeaponUSP::USPFire( float flSpread )
 		GetWeaponID(),
 		m_bSilencerOn?Secondary_Mode:Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		GetInaccuracy(),
+		0.0f,		// v34 fires with flSpread alone, computed before m_flAccuracy was updated above
 		flSpread );
 
 	if (!m_iClip1 && pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0)

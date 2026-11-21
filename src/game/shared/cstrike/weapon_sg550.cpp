@@ -166,6 +166,9 @@ void CWeaponSG550::PrimaryAttack()
 	if ( !pPlayer )
 		return;
 
+	// v34 computes the spread from the accuracy before this shot updates it
+	const float flSpread = GetInaccuracy();
+
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
 	m_flAccuracy = 0.65 + (0.35) * (gpGlobals->curtime - m_flLastFire);	
 
@@ -174,7 +177,7 @@ void CWeaponSG550::PrimaryAttack()
 
 	m_flLastFire = gpGlobals->curtime;
 
-	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode, flSpread ) )
 		return;
 
 	QAngle angle = pPlayer->GetPunchAngle();
