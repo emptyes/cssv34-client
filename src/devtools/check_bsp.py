@@ -401,7 +401,8 @@ class Checker:
         for i in range(nocc):
             flags, first, num = struct.unpack_from('<iii', data, occ_start + i * occ_size)
             area = struct.unpack_from('<i', data, occ_start + i * occ_size + 36)[0] if ver == 2 else 1
-            if first < 0 or num < 0 or first + num > npoly or not 0 <= area < MAX_AREA_STATE_BITS:
+            # area -1: vbsp writes it for occluders without polygons (de_aztec)
+            if first < 0 or num < 0 or first + num > npoly or not -1 <= area < MAX_AREA_STATE_BITS:
                 self.fail('bad occluder %d (lump version %d, %d occluders, %d polygons, %d vertex indices; '
                           'flags %d, first polygon %d, polygons %d, area %d; lump size %d)'
                           % (i, ver, nocc, npoly, nvi, flags, first, num, area, len(data)))

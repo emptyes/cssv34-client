@@ -2012,7 +2012,7 @@ static bool Mod_ValidateAreasAndOccluders( worldbrushdata_t *pMap )
 		const doccluderdata_t &occluder = pMap->occluders[i];
 		if ( occluder.firstpoly < 0 || occluder.polycount < 0 ||
 			occluder.firstpoly + occluder.polycount > pMap->numoccluderpolys ||
-			occluder.area < 0 || occluder.area >= MAX_AREA_STATE_BYTES * 8 )
+			occluder.area < -1 || occluder.area >= MAX_AREA_STATE_BYTES * 8 )	// -1: no area (de_aztec)
 			pszError = "occluder";
 		nIndex = i;
 	}

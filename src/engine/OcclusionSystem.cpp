@@ -2481,7 +2481,8 @@ void COcclusionSystem::RecomputeOccluderEdgeList()
 			continue;
 
 		// Skip the occluder if it's in a disconnected area
-		if ( cl.m_chAreaBits &&
+		// area -1: vbsp writes it for occluders without polygons
+		if ( cl.m_chAreaBits && pOccluders[i].area >= 0 &&
 			(cl.m_chAreaBits[pOccluders[i].area >> 3] & (1 << ( pOccluders[i].area & 0x7 )) ) == 0 )
 			continue;
 
