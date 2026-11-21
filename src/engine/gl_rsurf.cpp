@@ -2760,7 +2760,7 @@ static void R_RecursiveWorldNode( CWorldRenderList *pRenderList, mnode_t *node, 
 #define INVALID_WATER_HEIGHT 1000000.0f
 inline float R_GetWaterHeight( int nFogVolume )
 {
-	if( nFogVolume < 0 || nFogVolume > host_state.worldbrush->numleafwaterdata )
+	if( nFogVolume < 0 || nFogVolume >= host_state.worldbrush->numleafwaterdata )
 		return INVALID_WATER_HEIGHT;
 
 	mleafwaterdata_t* pLeafWaterData = &host_state.worldbrush->leafwaterdata[nFogVolume];
@@ -2769,10 +2769,12 @@ inline float R_GetWaterHeight( int nFogVolume )
 
 IMaterial *R_GetFogVolumeMaterial( int nFogVolume, bool bEyeInFogVolume )
 {
-	if( nFogVolume < 0 || nFogVolume > host_state.worldbrush->numleafwaterdata )
+	if( nFogVolume < 0 || nFogVolume >= host_state.worldbrush->numleafwaterdata )
 		return NULL;
 
 	mleafwaterdata_t* pLeafWaterData = &host_state.worldbrush->leafwaterdata[nFogVolume];
+	if ( pLeafWaterData->surfaceTexInfoID < 0 )
+		return NULL;
 	mtexinfo_t* pTexInfo = &host_state.worldbrush->texinfo[pLeafWaterData->surfaceTexInfoID];
 
 	IMaterial* pMaterial = pTexInfo->material;

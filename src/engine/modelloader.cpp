@@ -1177,8 +1177,12 @@ static int ComputeLightmapSize( dface_t *pFace, mtexinfo_t *pTexInfo )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+// size of the loaded lighting lump, to check the faces' sample ranges
+static int s_nLightDataSize = 0;
+
 void Mod_LoadLighting( CMapLoadHelper &lh )
 {
+	s_nLightDataSize = lh.LumpSize();
 	if ( !lh.LumpSize() )
 	{
 		lh.GetMap()->lightdata = NULL;
@@ -1269,8 +1273,16 @@ void Mod_LoadWorldlights( CMapLoadHelper &lh, bool bIsHDR )
 #endif
 
 	// Fixup for backward compatability
+	const int nClusters = GetCollisionBSPData()->numclusters;
 	for ( int i = 0; i < lh.GetMap()->numworldlights; i++ )
 	{
+		// the cluster indexes PVS bit arrays and the style the light style tables
+		dworldlight_t &light = lh.GetMap()->worldlights[i];
+		if ( light.cluster >= nClusters )
+			light.cluster = -1;
+		if ( light.style < 0 || light.style >= MAX_LIGHTSTYLES )
+			light.style = 0;
+
 		if( lh.GetMap()->worldlights[i].type == emit_spotlight)
 		{
 			if ((lh.GetMap()->worldlights[i].constant_attn == 0.0) && 
@@ -1381,6 +1393,11 @@ void Mod_LoadSubmodels( CUtlVector<mmodel_t> &submodelList )
 			submodelList[i].origin[j] = in->origin[j];
 		}
 		submodelList[i].radius = RadiusFromBounds (submodelList[i].mins, submodelList[i].maxs);
+		if ( in->firstface < 0 || in->numfaces < 0 || in->firstface + in->numfaces > lh.GetMap()->numsurfaces )
+		{
+			Host_Error( "Mod_LoadSubmodels: bad face range in model %d in %s\n", i, lh.GetMapName() );
+			return;
+		}
 		submodelList[i].headnode = in->headnode;
 		submodelList[i].firstface = in->firstface;
 		submodelList[i].numfaces = in->numfaces;
@@ -1441,11 +1458,21 @@ void Mod_LoadOcclusion( void )
 
 	CUtlBuffer buf( lh.LumpBase(), lh.LumpSize(), CUtlBuffer::READ_ONLY );
 
+	// each count from the file must fit in the remaining bytes before it's used to allocate
+	#define OCCLUSION_CHECK_COUNT( count, elemsize ) \
+		if ( (count) < 0 || (int64)(count) * (elemsize) > buf.TellMaxPut() - buf.TellGet() ) \
+		{ \
+			b->numoccluders = b->numoccluderpolys = b->numoccludervertindices = 0; \
+			Host_Error( "Mod_LoadOcclusion: bad occlusion data in %s\n", lh.GetMapName() ); \
+			return; \
+		}
+
 	switch( lh.LumpVersion() )
 	{
 	case LUMP_OCCLUSION_VERSION:
 		{
 			b->numoccluders = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccluders, sizeof(doccluderdata_t) );
 			if (b->numoccluders)
 			{
 				int nSize = b->numoccluders * sizeof(doccluderdata_t);
@@ -1454,6 +1481,7 @@ void Mod_LoadOcclusion( void )
 			}
 
 			b->numoccluderpolys = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccluderpolys, sizeof(doccluderpolydata_t) );
 			if (b->numoccluderpolys)
 			{
 				int nSize = b->numoccluderpolys * sizeof(doccluderpolydata_t);
@@ -1462,6 +1490,7 @@ void Mod_LoadOcclusion( void )
 			}
 
 			b->numoccludervertindices = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccludervertindices, sizeof(int) );
 			if (b->numoccludervertindices)
 			{
 				int nSize = b->numoccludervertindices * sizeof(int);
@@ -1474,6 +1503,7 @@ void Mod_LoadOcclusion( void )
 	case 1:
 		{
 			b->numoccluders = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccluders, sizeof(doccluderdataV1_t) );
 			if (b->numoccluders)
 			{
 				int nSize = b->numoccluders * sizeof(doccluderdata_t);
@@ -1489,6 +1519,7 @@ void Mod_LoadOcclusion( void )
 			}
 
 			b->numoccluderpolys = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccluderpolys, sizeof(doccluderpolydata_t) );
 			if (b->numoccluderpolys)
 			{
 				int nSize = b->numoccluderpolys * sizeof(doccluderpolydata_t);
@@ -1497,6 +1528,7 @@ void Mod_LoadOcclusion( void )
 			}
 
 			b->numoccludervertindices = buf.GetInt();
+			OCCLUSION_CHECK_COUNT( b->numoccludervertindices, sizeof(int) );
 			if (b->numoccludervertindices)
 			{
 				int nSize = b->numoccludervertindices * sizeof(int);
@@ -1576,7 +1608,7 @@ void Mod_LoadTexinfo( void )
 
 		if ( loadtextures )
 		{
-			if ( in->texdata >= 0 )
+			if ( in->texdata >= 0 && in->texdata < lh.GetMap()->numtexdata )
 			{
 				out->material = GL_LoadMaterial( lh.GetMap()->texdata[ in->texdata ].name, TEXTURE_GROUP_WORLD );
 			}
@@ -1622,6 +1654,30 @@ static void CheckSurfaceLighting( SurfaceHandle_t surfID, worldbrushdata_t *pBru
 	if ( SurfHasBumpedLightmaps( surfID ) )
 	{
 		offset *= ( NUM_BUMP_VECTS + 1 );
+	}
+
+	// The face's lightofs comes from the file: the samples of every style, and the average
+	// colors stored right before them, must be inside the lighting lump. Otherwise the face
+	// is drawn without a lightmap instead of reading outside the lump.
+	{
+		int nStyles = 0;
+		for ( int maps = 0; maps < MAXLIGHTMAPS; ++maps )
+		{
+			if ( pLighting->m_nStyles[maps] != 255 )
+				++nStyles;
+		}
+		int64 nBegin = (int64)( (byte *)pLighting->m_pSamples - (byte *)pBrushData->lightdata );
+		int64 nNeeded = (int64)offset * MAX( nStyles, 1 ) * sizeof( ColorRGBExp32 );
+		if ( !pBrushData->lightdata || nBegin < (int64)nStyles * sizeof( ColorRGBExp32 ) || nBegin + nNeeded > s_nLightDataSize )
+		{
+			DevWarning( "Face %d has an invalid lightmap offset, ignoring its lighting\n", (int)( surfID - pBrushData->surfaces2 ) );
+			pLighting->m_pSamples = NULL;
+			for ( int maps = 0; maps < MAXLIGHTMAPS; ++maps )
+				pLighting->m_nStyles[maps] = 255;
+			MSurf_Flags( surfID ) &= ~SURFDRAW_HASLIGHTSYTLES;
+			MSurf_Flags( surfID ) |= SURFDRAW_NOLIGHT;
+			return;
+		}
 	}
 
 
@@ -1779,6 +1835,15 @@ void Mod_LoadVertNormalIndices( void )
 	lh.GetMap()->vertnormalindices = out;
 	lh.GetMap()->numvertnormalindices = count;
 
+	for ( int i = 0; i < count; i++ )
+	{
+		if ( out[i] >= lh.GetMap()->numvertnormals )
+		{
+			Host_Error( "Mod_LoadVertNormalIndices: bad normal index in %s\n", lh.GetMapName() );
+			return;
+		}
+	}
+
 	// OPTIMIZE: Water surfaces don't need vertex normals?
 	int normalIndex = 0;
 	for( int i = 0; i < lh.GetMap()->numsurfaces; i++ )
@@ -1786,6 +1851,12 @@ void Mod_LoadVertNormalIndices( void )
 		SurfaceHandle_t surfID = SurfaceHandleFromIndex( i, lh.GetMap() );
 		MSurf_FirstVertNormal( surfID, lh.GetMap() ) = normalIndex;
 		normalIndex += MSurf_VertCount( surfID );
+	}
+	// every face vertex has a normal index
+	if ( normalIndex > count )
+	{
+		Host_Error( "Mod_LoadVertNormalIndices: too few normal indices in %s\n", lh.GetMapName() );
+		return;
 	}
 }
 
@@ -1905,6 +1976,73 @@ void Mod_LoadLump(
 
 
 //-----------------------------------------------------------------------------
+// Purpose: Checks the indices the area portal and occlusion code uses with the
+//          values from the map file (areas, area portals, clip portal vertices,
+//          occluders). The bit arrays for area and portal state have a fixed size.
+//-----------------------------------------------------------------------------
+static bool Mod_ValidateAreasAndOccluders( worldbrushdata_t *pMap )
+{
+	const char *pszError = NULL;
+	int nIndex = 0;
+
+	for ( int i = 0; i < pMap->m_nAreas && !pszError; i++ )
+	{
+		const darea_t &area = pMap->m_pAreas[i];
+		if ( area.firstareaportal < 0 || area.numareaportals < 0 ||
+			area.firstareaportal + area.numareaportals > pMap->m_nAreaPortals )
+			pszError = "area portal range";
+		nIndex = i;
+	}
+	if ( pMap->m_nAreas > MAX_AREA_STATE_BYTES * 8 )
+		pszError = "area count";
+
+	for ( int i = 0; i < pMap->m_nAreaPortals && !pszError; i++ )
+	{
+		const dareaportal_t &portal = pMap->m_pAreaPortals[i];
+		if ( portal.m_PortalKey >= MAX_AREA_PORTAL_STATE_BYTES * 8 ||
+			portal.otherarea >= pMap->m_nAreas ||
+			portal.planenum < 0 || portal.planenum >= pMap->numplanes ||
+			(int)portal.m_FirstClipPortalVert + (int)portal.m_nClipPortalVerts > pMap->m_nClipPortalVerts )
+			pszError = "area portal";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pMap->numoccluders && !pszError; i++ )
+	{
+		const doccluderdata_t &occluder = pMap->occluders[i];
+		if ( occluder.firstpoly < 0 || occluder.polycount < 0 ||
+			occluder.firstpoly + occluder.polycount > pMap->numoccluderpolys ||
+			occluder.area < 0 || occluder.area >= MAX_AREA_STATE_BYTES * 8 )
+			pszError = "occluder";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pMap->numoccluderpolys && !pszError; i++ )
+	{
+		const doccluderpolydata_t &poly = pMap->occluderpolys[i];
+		if ( poly.firstvertexindex < 0 || poly.vertexcount < 0 ||
+			poly.firstvertexindex + poly.vertexcount > pMap->numoccludervertindices ||
+			poly.planenum < 0 || poly.planenum >= pMap->numplanes )
+			pszError = "occluder polygon";
+		nIndex = i;
+	}
+
+	for ( int i = 0; i < pMap->numoccludervertindices && !pszError; i++ )
+	{
+		if ( pMap->occludervertindices[i] < 0 || pMap->occludervertindices[i] >= pMap->numvertexes )
+			pszError = "occluder vertex";
+		nIndex = i;
+	}
+
+	if ( pszError )
+	{
+		Host_Error( "Map is corrupted: bad %s (%d)\n", pszError, nIndex );
+		return false;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
 // Sets up the msurfacelighting_t structure
 //-----------------------------------------------------------------------------
 bool Mod_LoadSurfaceLightingV1( msurfacelighting_t *pLighting, dface_t *in, ColorRGBExp32 *pBaseLightData )
@@ -2008,6 +2146,37 @@ void Mod_LoadFaces( void )
 
 	for ( surfnum=0 ; surfnum<count ; ++surfnum, ++in, ++out1, ++out2, ++pLighting )
 	{
+		// the vertex range, the plane and the primitives are used directly by the renderer
+		if ( in->firstedge < 0 || in->numedges < 0 || in->numedges > 255 ||
+			in->firstedge + in->numedges > pBrushData->numvertindices ||
+			in->planenum >= pBrushData->numplanes ||
+			(int)in->firstPrimID + (int)in->GetNumPrims() > pBrushData->numprimitives )
+		{
+			Host_Error( "Mod_LoadFaces: bad face %d in %s\n", surfnum, lh.GetMapName() );
+			return;
+		}
+		for ( int iPrim = 0; iPrim < in->GetNumPrims(); iPrim++ )
+		{
+			const mprimitive_t &prim = pBrushData->primitives[in->firstPrimID + iPrim];
+			if ( (int)prim.firstIndex + prim.indexCount > pBrushData->numprimindices ||
+				(int)prim.firstVert + prim.vertCount > pBrushData->numprimverts )
+			{
+				Host_Error( "Mod_LoadFaces: bad primitive for face %d in %s\n", surfnum, lh.GetMapName() );
+				return;
+			}
+			// indices are relative to the primitive's own vertices, or to the face's vertices
+			for ( int iIndex = 0; iIndex < prim.indexCount; iIndex++ )
+			{
+				int nIndex = pBrushData->primindices[prim.firstIndex + iIndex];
+				bool bBad = prim.vertCount ? ( nIndex < prim.firstVert || nIndex >= prim.firstVert + prim.vertCount ) : ( nIndex >= in->numedges );
+				if ( bBad )
+				{
+					Host_Error( "Mod_LoadFaces: bad primitive index for face %d in %s\n", surfnum, lh.GetMapName() );
+					return;
+				}
+			}
+		}
+
 		SurfaceHandle_t surfID = SurfaceHandleFromIndex( surfnum, pBrushData );
 		MSurf_FirstVertIndex( surfID )  = in->firstedge;
 		
@@ -2192,6 +2361,11 @@ void Mod_LoadNodes( void )
 		p = in->planenum;
 		out->plane = lh.GetMap()->planes + p;
 
+		if ( (int)in->firstface + (int)in->numfaces > lh.GetMap()->numsurfaces )
+		{
+			Host_Error( "Mod_LoadNodes: bad face range in node %d in %s\n", i, lh.GetMapName() );
+			return;
+		}
 		out->firstsurface = in->firstface;
 		out->numsurfaces = in->numfaces;
 		out->area = in->area;
@@ -2323,7 +2497,7 @@ void Mod_LoadLeafs_Version_1( CMapLoadHelper &lh, CMapLoadHelper &ambientLightin
 	{
 		// convert from previous version
 		CompressedLightCube *inLightCubes = NULL;
-		if ( ambientLightingLump.LumpSize() )
+		if ( ambientLightingLump.LumpSize() >= (int)( count * sizeof( CompressedLightCube ) ) )
 		{
 			inLightCubes = ( CompressedLightCube * )ambientLightingLump.LumpBase();
 			Assert( ambientLightingLump.LumpSize() % sizeof( CompressedLightCube ) == 0 );
@@ -2360,6 +2534,22 @@ void Mod_LoadLeafs_Version_1( CMapLoadHelper &lh, CMapLoadHelper &ambientLightin
 		Assert( ambientLightingLump.LumpSize() % sizeof( dleafambientlighting_t ) == 0 );
 		Assert( ambientLightingTable.LumpSize() % sizeof( dleafambientindex_t ) == 0 );
 		Assert((ambientLightingTable.LumpSize() / sizeof(dleafambientindex_t)) == (unsigned)count);	// should have one of these per leaf
+		// one table entry per leaf, and every entry's samples inside the sample lump
+		const int nTableCount = ambientLightingTable.LumpSize() / sizeof( dleafambientindex_t );
+		const int nSampleCount = ambientLightingLump.LumpSize() / sizeof( dleafambientlighting_t );
+		bool bValid = nTableCount >= count;
+		const dleafambientindex_t *pInTable = (const dleafambientindex_t *)ambientLightingTable.LumpBase();
+		for ( i = 0; i < count && bValid; i++ )
+		{
+			if ( (int)pInTable[i].firstAmbientSample + (int)pInTable[i].ambientSampleCount > nSampleCount )
+				bValid = false;
+		}
+		if ( !bValid )
+		{
+			Host_Error( "Mod_LoadLeafs: bad ambient lighting data in %s\n", lh.GetMapName() );
+			return;
+		}
+
 		lh.GetMap()->m_pLeafAmbient = (mleafambientindex_t *)Hunk_AllocName( ambientLightingTable.LumpSize(), "LeafAmbient" );
 		lh.GetMap()->m_pAmbientSamples = (mleafambientlighting_t *)Hunk_AllocName( ambientLightingLump.LumpSize(), "LeafAmbientSamples" );
 		Q_memcpy( lh.GetMap()->m_pLeafAmbient, ambientLightingTable.LumpBase(), ambientLightingTable.LumpSize() );
@@ -2460,11 +2650,23 @@ void Mod_LoadLeafWaterData( void )
 	lh.GetMap()->numleafwaterdata = count;
 	for ( i=0 ; i<count ; i++, in++, out++)
 	{
+		if ( in->surfaceTexInfoID < -1 || in->surfaceTexInfoID >= lh.GetMap()->numtexinfo )	// -1: no surface
+		{
+			Host_Error( "Mod_LoadLeafWaterData: bad texinfo in %s\n", lh.GetMapName() );
+			return;
+		}
 		out->minZ = in->minZ;
 		out->surfaceTexInfoID = in->surfaceTexInfoID;
 		out->surfaceZ = in->surfaceZ;
 		out->firstLeafIndex = -1;
 	}
+	// leafs without valid water data are treated as dry
+	for ( i = 0; i < lh.GetMap()->numleafs; i++ )
+	{
+		if ( lh.GetMap()->leafs[i].leafWaterDataID >= count )
+			lh.GetMap()->leafs[i].leafWaterDataID = -1;
+	}
+
 	if ( count == 1 )
 	{
 		worldbrushdata_t *brush = lh.GetMap();
@@ -2591,7 +2793,8 @@ void Mod_LoadLeafMinDistToWater( void )
 		}
 	}
 	
-	if( !foundOne || lh.LumpSize() == 0 || !g_pMaterialSystemHardwareConfig || !g_pMaterialSystemHardwareConfig->SupportsVertexAndPixelShaders())
+	if( !foundOne || lh.LumpSize() == 0 || !g_pMaterialSystemHardwareConfig || !g_pMaterialSystemHardwareConfig->SupportsVertexAndPixelShaders() ||
+		(int)( lh.LumpSize() / sizeof( *pTmp ) ) < lh.GetMap()->numleafs )	// one value per leaf
 	{
 		// We don't bother keeping this if:
 		// 1) there is no water in the map
@@ -2648,6 +2851,28 @@ void Mod_LoadMarksurfaces( void )
 		if ( !SurfaceHasDispInfo( surfID ) && !(MSurf_Flags(surfID) & SURFDRAW_NODRAW) )
 		{
 			realCount++;
+		}
+	}
+
+	// The leaf ranges come from the file. Leafs can share ranges, so count the kept surfaces
+	// per leaf: the list below is filled per leaf, not per lump entry.
+	realCount = 0;
+	for ( i = 0; i < pBrushData->numleafs; i++ )
+	{
+		const mleaf_t &leaf = pBrushData->leafs[i];
+		if ( leaf.firstmarksurface < 0 || leaf.nummarksurfaces < 0 || leaf.firstmarksurface + leaf.nummarksurfaces > count )
+		{
+			delete[] tempDiskData;
+			pBrushData->marksurfaces = NULL;
+			pBrushData->nummarksurfaces = 0;
+			Host_Error( "Mod_LoadMarksurfaces: bad leaf face range in %s\n", lh.GetMapName() );
+			return;
+		}
+		for ( j = 0; j < leaf.nummarksurfaces; j++ )
+		{
+			SurfaceHandle_t surfID = tempDiskData[leaf.firstmarksurface + j];
+			if ( !SurfaceHasDispInfo( surfID ) && !(MSurf_Flags(surfID) & SURFDRAW_NODRAW) )
+				realCount++;
 		}
 	}
 
@@ -2726,6 +2951,8 @@ void Mod_LoadSurfedges( medge_t *pedges )
 	lh.GetMap()->vertindices = out;
 	lh.GetMap()->numvertindices = count;
 
+	const int nEdges = CMapLoadHelper::LumpSize( LUMP_EDGES ) / sizeof( dedge_t );
+	const int nVertexes = lh.GetMap()->numvertexes;
 	for ( i=0 ; i<count ; i++)
 	{
 		int edge = in[i];
@@ -2734,6 +2961,13 @@ void Mod_LoadSurfedges( medge_t *pedges )
 		{
 			edge = -edge;
 			index = 1;
+		}
+		// edge == INT_MIN stays negative after the negation
+		if ( edge < 0 || edge >= nEdges || pedges[edge].v[index] >= nVertexes )
+		{
+			delete[] pedges;
+			Host_Error( "Mod_LoadSurfedges: bad edge %d in %s\n", in[i], lh.GetMapName() );
+			return;
 		}
 		out[i] = pedges[edge].v[index];
 	}
@@ -4664,6 +4898,10 @@ void CModelLoader::Map_LoadModel( model_t *mod )
 		sizeof(m_worldBrushData.m_pAreas[0]), 
 		(void**)&m_worldBrushData.m_pAreas,
 		&m_worldBrushData.m_nAreas );
+
+	COM_TimestampedLog( "  Mod_ValidateAreasAndOccluders" );
+	if ( !Mod_ValidateAreasAndOccluders( &m_worldBrushData ) )
+		return;
 
 	COM_TimestampedLog( "  Mod_LoadWorldlights" );
 	if ( g_pMaterialSystemHardwareConfig->GetHDREnabled() && CMapLoadHelper::LumpSize( LUMP_WORLDLIGHTS_HDR ) > 0 )

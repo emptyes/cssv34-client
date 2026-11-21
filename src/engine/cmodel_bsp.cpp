@@ -244,6 +244,10 @@ static bool CollisionBSPData_Validate( CCollisionBSPData *pBSPData )
 	const char *pszError = NULL;
 	int nIndex = 0;
 
+	// the extra empty leaf at the end is ours; the file can only reference its own leafs
+	// (the renderer loads the same lump without it)
+	const int nFileLeafs = pBSPData->numleafs - 1;
+
 	for ( int i = 0; i < pBSPData->numleafs && !pszError; i++ )
 	{
 		const cleaf_t &leaf = pBSPData->map_leafs[i];
@@ -266,7 +270,7 @@ static bool CollisionBSPData_Validate( CCollisionBSPData *pBSPData )
 		for ( int j = 0; j < 2; j++ )
 		{
 			int child = pBSPData->map_nodes[i].children[j];
-			if ( child >= 0 ? child >= pBSPData->numnodes : -1 - child >= pBSPData->numleafs )
+			if ( child >= 0 ? child >= pBSPData->numnodes : -1 - child >= nFileLeafs )
 				pszError = "node child";
 		}
 		nIndex = i;
@@ -275,9 +279,60 @@ static bool CollisionBSPData_Validate( CCollisionBSPData *pBSPData )
 	for ( int i = 0; i < pBSPData->numcmodels && !pszError; i++ )
 	{
 		int headnode = pBSPData->map_cmodels[i].headnode;
-		if ( headnode >= 0 ? headnode >= pBSPData->numnodes : -1 - headnode >= pBSPData->numleafs )
+		if ( headnode >= 0 ? headnode >= pBSPData->numnodes : -1 - headnode >= nFileLeafs )
 			pszError = "model head node";
 		nIndex = i;
+	}
+
+	// The nodes must form trees: the loaders and the tracing code walk them recursively,
+	// so a loop would never end. Every node has at most one parent, and every node is
+	// reachable from a node without a parent.
+	if ( !pszError )
+	{
+		CUtlVector<unsigned char> parents;
+		parents.SetCount( pBSPData->numnodes );
+		memset( parents.Base(), 0, pBSPData->numnodes );
+		for ( int i = 0; i < pBSPData->numnodes && !pszError; i++ )
+		{
+			for ( int j = 0; j < 2; j++ )
+			{
+				int child = pBSPData->map_nodes[i].children[j];
+				if ( child >= 0 && ++parents[child] > 1 )
+				{
+					pszError = "node tree";
+					nIndex = child;
+				}
+			}
+		}
+
+		if ( !pszError )
+		{
+			CUtlVector<int> stack;
+			int nVisited = 0;
+			for ( int root = 0; root < pBSPData->numnodes; root++ )
+			{
+				if ( parents[root] )
+					continue;
+				stack.AddToTail( root );
+				while ( stack.Count() )
+				{
+					int node = stack.Tail();
+					stack.RemoveMultipleFromTail( 1 );
+					nVisited++;
+					for ( int j = 0; j < 2; j++ )
+					{
+						int child = pBSPData->map_nodes[node].children[j];
+						if ( child >= 0 )
+							stack.AddToTail( child );
+					}
+				}
+			}
+			if ( nVisited != pBSPData->numnodes )
+			{
+				pszError = "node tree";
+				nIndex = nVisited;
+			}
+		}
 	}
 
 	for ( int i = 0; i < pBSPData->numareas && !pszError; i++ )
