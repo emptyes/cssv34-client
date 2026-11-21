@@ -397,6 +397,9 @@ private:
 	CreateInterfaceFn m_FactoryList[MAX_NUM_FACTORIES];
 	int m_iNumFactories;
 
+	void InitUISystem();
+	void ShutdownUISystem();
+
 	CSysModule *m_hStaticGameUIModule;
 	CSysModule *m_hStaticUISystemModule;
 	CreateInterfaceFn m_GameUIFactory;
@@ -531,6 +534,8 @@ CEngineVGui::CEngineVGui()
 
 	m_hStaticGameUIModule = NULL;
 	m_GameUIFactory = NULL;
+	m_hStaticUISystemModule = NULL;
+	m_UISystemFactory = NULL;
 
 #ifdef VPROF_ENABLED
 	m_pVProfPanel = NULL;
@@ -564,24 +569,70 @@ bool CEngineVGui::SetVGUIDirectories()
 }
 
 //-----------------------------------------------------------------------------
+// RmlUi-based uisystem. The game UI stays VGUI, as in v34: uisystem is only
+// loaded with -rmlui, and failing to load it is not fatal.
+//-----------------------------------------------------------------------------
+void CEngineVGui::InitUISystem()
+{
+	staticUISystemFuncs = NULL;
+	m_hStaticUISystemModule = NULL;
+	m_UISystemFactory = NULL;
+
+	if ( !CommandLine()->FindParm( "-rmlui" ) )
+		return;
+
+	m_hStaticUISystemModule = g_pFileSystem->LoadModule( "uisystem", "EXECUTABLE_PATH" );
+	m_UISystemFactory = Sys_GetFactory( m_hStaticUISystemModule );
+	if ( !m_UISystemFactory )
+	{
+		Warning( "Could not load uisystem, RmlUi is disabled\n" );
+		ShutdownUISystem();
+		return;
+	}
+
+	IUISystem *pUISystem = (IUISystem *)m_UISystemFactory( UISYSTEM_INTERFACE_VERSION, NULL );
+	if ( !pUISystem )
+	{
+		Warning( "Could not get IUISystem interface %s from uisystem, RmlUi is disabled\n", UISYSTEM_INTERFACE_VERSION );
+		ShutdownUISystem();
+		return;
+	}
+
+	if ( !pUISystem->Start( &g_AppSystemFactory, 1 ) )
+	{
+		// a failed Start leaves the RmlUi contexts uncreated: Stop() must not be called.
+		// The module stays loaded until shutdown, client.dll may hold the same instance.
+		Warning( "uisystem failed to start, RmlUi is disabled\n" );
+		return;
+	}
+
+	staticUISystemFuncs = pUISystem;
+}
+
+void CEngineVGui::ShutdownUISystem()
+{
+	if ( staticUISystemFuncs )
+	{
+		staticUISystemFuncs->Stop();
+		staticUISystemFuncs = NULL;
+	}
+
+	if ( m_hStaticUISystemModule )
+	{
+		Sys_UnloadModule( m_hStaticUISystemModule );
+		m_hStaticUISystemModule = NULL;
+	}
+
+	m_UISystemFactory = NULL;
+}
+
+//-----------------------------------------------------------------------------
 // Setup the base vgui panels
 //-----------------------------------------------------------------------------
 void CEngineVGui::Init()
 {
-	m_hStaticUISystemModule = g_pFileSystem->LoadModule("uisystem", "EXECUTABLE_PATH");
-	m_UISystemFactory = Sys_GetFactory(m_hStaticUISystemModule);
-	if (!m_UISystemFactory)
-	{
-		Error("Could not load: %s\n", "uisystem");
-	}
+	InitUISystem();
 
-	staticUISystemFuncs = (IUISystem *)m_UISystemFactory(UISYSTEM_INTERFACE_VERSION, NULL);
-	if (!staticUISystemFuncs)
-	{
-		Error("Could not get IUISystem interface %s from %s\n", UISYSTEM_INTERFACE_VERSION, "uisystem");
-	}
-
-	staticUISystemFuncs->Start(&g_AppSystemFactory, 1);
 	g_bVGUIDisabled = !!CommandLine()->FindParm("-novgui");
 	if (g_bVGUIDisabled) return;
 
@@ -932,7 +983,7 @@ extern bool g_bUsingLegacyAppSystems;
 //-----------------------------------------------------------------------------
 void CEngineVGui::Shutdown()
 {
-	staticUISystemFuncs->Stop();
+	ShutdownUISystem();
 	if (g_bVGUIDisabled) return;
 	if ( IsPC() && CL_IsHL2Demo() ) // if they are playing the demo then open the storefront on shutdown
 	{
@@ -1309,7 +1360,8 @@ LoadingProgressDescription_t &GetProgressDescription(int eProgress)
 //-----------------------------------------------------------------------------
 void CEngineVGui::OnLevelLoadingStarted()
 {
-	staticUISystemFuncs->OnLevelLoadingStarted();
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->OnLevelLoadingStarted();
 
 	if (g_bVGUIDisabled) return;
 
@@ -1367,7 +1419,8 @@ void CEngineVGui::OnLevelLoadingStarted()
 //-----------------------------------------------------------------------------
 void CEngineVGui::OnLevelLoadingFinished()
 {
-	staticUISystemFuncs->OnLevelLoadingFinished(gfExtendedError, gszDisconnectReason, gszExtendedDisconnectReason);
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->OnLevelLoadingFinished(gfExtendedError, gszDisconnectReason, gszExtendedDisconnectReason);
 
 	if (g_bVGUIDisabled) return;
 
@@ -1449,7 +1502,8 @@ void CEngineVGui::OnLevelLoadingFinished()
 //-----------------------------------------------------------------------------
 void CEngineVGui::ShowErrorMessage()
 {
-	staticUISystemFuncs->OnLevelLoadingFinished(gfExtendedError, gszDisconnectReason, gszExtendedDisconnectReason);
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->OnLevelLoadingFinished(gfExtendedError, gszDisconnectReason, gszExtendedDisconnectReason);
 
 	if (g_bVGUIDisabled) return;
 
@@ -1528,7 +1582,8 @@ void CEngineVGui::UpdateProgressBar(LevelLoadingProgress_e progress)
 
 	m_eLastProgressPoint = progress;
 
-	staticUISystemFuncs->UpdateProgressBar(flPerc, desc.pszDesc);
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->UpdateProgressBar(flPerc, desc.pszDesc);
 
 	if (g_bVGUIDisabled) return;
 
@@ -1548,7 +1603,8 @@ void CEngineVGui::UpdateCustomProgressBar( float progress, const wchar_t *desc )
 	char ansi[1024];
 	g_pVGuiLocalize->ConvertUnicodeToANSI( desc, ansi, sizeof( ansi ) );
 
-	staticUISystemFuncs->UpdateProgressBar(progress, ansi);
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->UpdateProgressBar(progress, ansi);
 
 	if (g_bVGUIDisabled) return;
 
@@ -1565,7 +1621,8 @@ void CEngineVGui::UpdateCustomProgressBar( float progress, const wchar_t *desc )
 
 void CEngineVGui::StartCustomProgress()
 {
-	staticUISystemFuncs->OnLevelLoadingStarted();
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->OnLevelLoadingStarted();
 
 	if (g_bVGUIDisabled) return;
 
@@ -1579,7 +1636,8 @@ void CEngineVGui::StartCustomProgress()
 
 void CEngineVGui::FinishCustomProgress()
 {
-	staticUISystemFuncs->OnLevelLoadingFinished( false, "", "");
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->OnLevelLoadingFinished( false, "", "");
 	if (g_bVGUIDisabled) return;
 
 	if (!staticGameUIFuncs)
@@ -1596,7 +1654,8 @@ void CEngineVGui::SetProgressBias( float bias )
 
 void CEngineVGui::UpdateProgressBar( float progress )
 {
-	staticUISystemFuncs->UpdateProgressBar(progress, "");
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->UpdateProgressBar(progress, "");
 
 	if (g_bVGUIDisabled) return;
 
@@ -1867,7 +1926,8 @@ void CEngineVGui::Paint( PaintMode_t mode )
 		toolframework->VGui_PostRenderAllTools(mode);
 	}
 
-	staticUISystemFuncs->Draw();
+	if ( staticUISystemFuncs )
+		staticUISystemFuncs->Draw();
 }
 
 bool CEngineVGui::IsDebugSystemVisible( void )

@@ -491,7 +491,12 @@ bool CUISystem::DispatchEventToContext(Rml::Context& context, const InputEvent_t
 
 Rml::DataModelConstructor CUISystem::CreateDataModel(UIState ctx, const char* name)
 {
-    return StateToContext(ctx)->CreateDataModel(name);
+    // no context when Start() failed: an empty constructor tells callers to skip their model
+    Rml::Context* pContext = StateToContext(ctx);
+    if (!pContext)
+        return Rml::DataModelConstructor();
+
+    return pContext->CreateDataModel(name);
 }
 
 void CUISystem::ChangeUIState(UIState state)
