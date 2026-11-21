@@ -3055,10 +3055,21 @@ void Callback_UserInfoChanged( void *object, INetworkStringTable *stringTable, i
 
 	// stringnumber == player slot
 
-	player_info_t *player = (player_info_t*)newData;
-
-	if ( !player )
+	if ( !newData )
 		return; // player left the game
+
+	// the data comes from the server: use it only if it is a whole player_info_t
+	int cubPlayerInfo = 0;
+	stringTable->GetStringUserData( stringNumber, &cubPlayerInfo );
+	if ( cubPlayerInfo < (int)sizeof( player_info_t ) )
+		return;
+
+	player_info_t playerInfo;
+	Q_memcpy( &playerInfo, newData, sizeof( playerInfo ) );
+	playerInfo.name[ sizeof( playerInfo.name ) - 1 ] = '\0';
+	playerInfo.guid[ sizeof( playerInfo.guid ) - 1 ] = '\0';
+	playerInfo.friendsName[ sizeof( playerInfo.friendsName ) - 1 ] = '\0';
+	player_info_t *player = &playerInfo;
 
 	// request custom user files if necessary
 	for ( int i=0; i<MAX_CUSTOM_FILES; i++ )

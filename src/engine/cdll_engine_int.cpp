@@ -749,6 +749,11 @@ bool CEngineClient::GetPlayerInfo( int ent_num, player_info_t *pinfo )
 
 	Q_memcpy( pinfo, pi, sizeof( player_info_t ) );
 
+	// the server fills these: make sure the strings are terminated
+	pinfo->name[ sizeof( pinfo->name ) - 1 ] = '\0';
+	pinfo->guid[ sizeof( pinfo->guid ) - 1 ] = '\0';
+	pinfo->friendsName[ sizeof( pinfo->friendsName ) - 1 ] = '\0';
+
 	// Fixup from network order (little endian)
 	CByteswap byteswap;
 	byteswap.SetTargetBigEndian( false );
@@ -1136,9 +1141,10 @@ int	CEngineClient::GetPlayerForUserID(int userID)
 	int nMaxClients = Min( cl.m_nMaxClients, cl.m_pUserInfoTable->GetNumStrings() );
 	for ( int i = 0; i < nMaxClients; i++ )
 	{
-		player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( i, NULL );
+		int cubPlayerInfo = 0;
+		player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( i, &cubPlayerInfo );
 
-		if ( !pi )
+		if ( !pi || cubPlayerInfo < (int)sizeof( player_info_t ) )
 			continue;
 
 		// Fixup from network order (little endian)

@@ -519,8 +519,9 @@ void CRConClient::Authenticate()
 			Assert( cl.m_pUserInfoTable );
 			if ( cl.m_pUserInfoTable )
 			{
-				player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( cl.m_nPlayerSlot, NULL );
-				if ( pi )
+				int cubPlayerInfo = 0;
+				player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( cl.m_nPlayerSlot, &cubPlayerInfo );
+				if ( pi && cubPlayerInfo >= (int)sizeof( player_info_t ) )
 				{
 					addedUserID = true;
 					// Fixup from network order (little endian)
