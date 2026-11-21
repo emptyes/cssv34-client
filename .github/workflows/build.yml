@@ -84,9 +84,23 @@ jobs:
         Get-ChildItem build -Recurse -Filter *.pdb | Where-Object { $names -contains $_.BaseName } | ForEach-Object { Copy-Item $_.FullName pdb\ -Force }
         Get-ChildItem pdb | Format-Table Name, Length
         7z a -mx9 cssv34_win64_pdb.7z .\pdb\*
-        7z a -tzip cssv34_win64_optimized.zip ..\win64_build\*
+        if ($LASTEXITCODE -ne 0) { throw "7z pdb failed" }
+        # debug symbols ship separately in cssv34_win64_pdb.7z
+        7z a -tzip cssv34_win64_optimized.zip ..\win64_build\* '-xr!*.pdb'
+        if ($LASTEXITCODE -ne 0) { throw "7z game failed" }
 
         cd ..
+
+    # Builds of other branches are not released: keep them downloadable from the run page
+    - name: Upload build
+      uses: actions/upload-artifact@v4
+      with:
+        name: cssv34_win64_${{ github.sha }}
+        path: |
+          src/cssv34_win64_optimized.zip
+          src/cssv34_win64_pdb.7z
+        if-no-files-found: error
+        retention-days: 14
 
     - name: Publish release
       if: github.ref == 'refs/heads/master'
