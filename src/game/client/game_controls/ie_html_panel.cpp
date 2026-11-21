@@ -25,6 +25,7 @@ CIEHTMLPanel::CIEHTMLPanel( Panel *pParent, const char *pszName ) : BaseClass( p
 	m_pBrowser = NULL;
 	m_bBrowserFailed = false;
 	m_nTextureID = -1;
+	m_nTexWide = m_nTexTall = 0;
 	m_nFrameWide = m_nFrameTall = 0;
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
@@ -127,8 +128,22 @@ void CIEHTMLPanel::OnThink()
 	if ( !m_pBrowser->Render( m_Pixels.Base(), wide, tall ) )
 		return;
 
+	// The surface allocates a procedural texture once, rounded up to a power of two, and
+	// never resizes it: create a new one when the panel no longer fits (resolution change),
+	// and draw only the part that holds the page (see Paint).
+	int texWide = SmallestPowerOfTwoGreaterOrEqual( wide );
+	int texTall = SmallestPowerOfTwoGreaterOrEqual( tall );
+	if ( m_nTextureID != -1 && ( texWide != m_nTexWide || texTall != m_nTexTall ) )
+	{
+		surface()->DestroyTextureID( m_nTextureID );
+		m_nTextureID = -1;
+	}
 	if ( m_nTextureID == -1 )
+	{
 		m_nTextureID = surface()->CreateNewTextureID( true );
+		m_nTexWide = texWide;
+		m_nTexTall = texTall;
+	}
 
 	surface()->DrawSetTextureRGBA( m_nTextureID, m_Pixels.Base(), wide, tall, 0, true );
 	m_nFrameWide = wide;
@@ -143,7 +158,8 @@ void CIEHTMLPanel::Paint()
 
 	surface()->DrawSetColor( 255, 255, 255, 255 );
 	surface()->DrawSetTexture( m_nTextureID );
-	surface()->DrawTexturedRect( 0, 0, m_nFrameWide, m_nFrameTall );
+	surface()->DrawTexturedSubRect( 0, 0, m_nFrameWide, m_nFrameTall, 0.0f, 0.0f,
+		(float)m_nFrameWide / m_nTexWide, (float)m_nFrameTall / m_nTexTall );
 }
 
 void CIEHTMLPanel::GetCursorLocal( int &x, int &y )

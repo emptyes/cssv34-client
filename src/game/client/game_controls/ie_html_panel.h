@@ -50,6 +50,7 @@ private:
 	CIEBrowser				*m_pBrowser;
 	bool					m_bBrowserFailed;
 	int						m_nTextureID;
+	int						m_nTexWide, m_nTexTall;	// power of two, as the surface allocates it
 	CUtlVector<unsigned char> m_Pixels;
 	int						m_nFrameWide, m_nFrameTall;
 	bool					m_bHasFrame;
