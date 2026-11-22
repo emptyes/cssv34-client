@@ -703,7 +703,11 @@ bool CZipPackFile::Prepare( int64 fileLen, int64 nFileOfs )
 	// Check for a preload section, expected to be the first file in the zip
 	zipDirBuff.GetObjects( &zipFileHeader );
 	zipDirBuff.Get( filename, Min( (size_t)zipFileHeader.fileNameLength, sizeof(filename) - 1 ) );
-	if ( !V_stricmp( filename, PRELOAD_SECTION_NAME ) )
+	// The preload section is an Xbox 360 xZip feature. Its header, directory and data
+	// offsets are used without any checks, and on PC a pack file comes from untrusted
+	// sources (the pakfile of a downloaded map), so it is ignored there: every file in
+	// it is also stored in the zip itself and is read from there.
+	if ( IsX360() && !V_stricmp( filename, PRELOAD_SECTION_NAME ) )
 	{
 		m_nPreloadSectionSize = zipFileHeader.uncompressedSize;
 		m_nPreloadSectionOffset = zipFileHeader.relativeOffsetOfLocalHeader +
