@@ -2105,6 +2105,16 @@ void KeyValues::ParseIncludedKeys( char const *resourceName, const char *filetoi
 	// Append included file
 	Q_strncat( fullpath, filetoinclude, sizeof( fullpath ), COPY_ALL_CHARACTERS );
 
+	// A file that includes itself (directly or through others) would recurse until the stack
+	// overflows; such files can come from servers (materials, resource files). The nesting
+	// of real files is a few levels.
+	static thread_local int s_nIncludeDepth = 0;
+	if ( s_nIncludeDepth >= 16 )
+	{
+		Warning( "KeyValues::ParseIncludedKeys: %s is included too deeply (recursive #include/#base?)\n", fullpath );
+		return;
+	}
+
 	KeyValues *newKV = new KeyValues( fullpath );
 
 	// CUtlSymbol save = s_CurrentFileSymbol;	// did that had any use ???
@@ -2112,7 +2122,11 @@ void KeyValues::ParseIncludedKeys( char const *resourceName, const char *filetoi
 	newKV->UsesEscapeSequences( m_bHasEscapeSequences != 0 );	// use same format as parent
 	newKV->UsesConditionals( m_bEvaluateConditionals != 0 );
 
-	if ( newKV->LoadFromFile( pFileSystem, fullpath, pPathID ) )
+	s_nIncludeDepth++;
+	bool bLoaded = newKV->LoadFromFile( pFileSystem, fullpath, pPathID );
+	s_nIncludeDepth--;
+
+	if ( bLoaded )
 	{
 		includedKeys.AddToTail( newKV );
 	}
