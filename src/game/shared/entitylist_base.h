@@ -152,7 +152,13 @@ inline IHandleEntity* CBaseEntityList::LookupEntityByNetworkIndex( int edictInde
 	if ( edictIndex < 0 )
 		return NULL;
 
-	Assert( edictIndex < NUM_ENT_ENTRIES );
+	// entity numbers come from network data (temp entities, effects, user messages)
+	// whose field width the server's send tables define
+	if ( edictIndex >= NUM_ENT_ENTRIES )
+	{
+		Assert( 0 );
+		return NULL;
+	}
 	return (IHandleEntity*)m_EntPtrArray[edictIndex].m_pEntity;
 }
 

@@ -94,8 +94,12 @@ void CClientEntityList::Release( void )
 
 IClientNetworkable* CClientEntityList::GetClientNetworkable( int entnum )
 {
-	Assert( entnum >= 0 );
-	Assert( entnum < MAX_EDICTS );
+	// the number can come from network data
+	if ( entnum < 0 || entnum >= MAX_EDICTS )
+	{
+		Assert( 0 );
+		return NULL;
+	}
 	return m_EntityCacheInfo[entnum].m_pNetworkable;
 }
 
