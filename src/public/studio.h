@@ -2588,6 +2588,7 @@ public:
 	float GetSequenceCycleRate( int iSequence );
 
 	void				RunFlexRules( const float *src, float *dest );
+	bool				IsFlexOpValid( const mstudioflexop_t *pop, const float *stack, int k ) const;
 
 
 public:

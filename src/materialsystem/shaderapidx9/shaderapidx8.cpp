@@ -10265,6 +10265,13 @@ void CShaderAPIDx8::LoadBoneMatrix( int boneIndex, const float *m )
 	if ( IsDeactivated() )	
 		return;
 
+	// the index comes from model data (the hardware bone of a strip's bone state change)
+	if ( boneIndex < 0 || boneIndex >= NUM_MODEL_TRANSFORMS )
+	{
+		Assert( 0 );
+		return;
+	}
+
 	memcpy( m_boneMatrix[boneIndex].Base(), m, sizeof(float)*12 );
 	if ( boneIndex > m_maxBoneLoaded )
 	{

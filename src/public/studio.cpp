@@ -1378,6 +1378,44 @@ int	CStudioHdr::RemapAnimBone( int iAnim, int iLocalBone ) const
 // Purpose: run the interpreted FAC's expressions, converting flex_controller 
 //			values into FAC weights
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// Purpose: checks one flex rule op before RunFlexRules runs it: the stack holds
+//          enough values, a pushed value fits, the controller and flex numbers
+//          (from the op or from the stack) exist
+//-----------------------------------------------------------------------------
+bool CStudioHdr::IsFlexOpValid( const mstudioflexop_t *pop, const float *stack, int k ) const
+{
+	const int nStackSize = 32;	// see RunFlexRules
+	const int nControllers = numflexcontrollers();
+	auto IsController = [nControllers]( float flIndex ) { return flIndex >= 0.0f && flIndex < (float)nControllers; };
+
+	switch ( pop->op )
+	{
+	case STUDIO_ADD: case STUDIO_SUB: case STUDIO_MUL: case STUDIO_DIV: case STUDIO_MAX: case STUDIO_MIN:
+		return k >= 2;
+	case STUDIO_NEG:
+		return k >= 1;
+	case STUDIO_CONST:
+		return k < nStackSize;
+	case STUDIO_FETCH1: case STUDIO_2WAY_0: case STUDIO_2WAY_1:
+		return k < nStackSize && pop->d.index >= 0 && pop->d.index < nControllers;
+	case STUDIO_FETCH2:
+		return k < nStackSize && pop->d.index >= 0 && pop->d.index < numflexdesc();
+	case STUDIO_COMBO:
+		return pop->d.index >= 1 && pop->d.index <= k;
+	case STUDIO_DOMINATE:
+		return pop->d.index >= 1 && pop->d.index + 1 <= k;
+	case STUDIO_NWAY:
+		return k >= 5 && pop->d.index >= 0 && pop->d.index < nControllers && IsController( stack[k - 1] );
+	case STUDIO_DME_LOWER_EYELID: case STUDIO_DME_UPPER_EYELID:
+		// stack[k-2] and stack[k-3] are optional (negative: none)
+		return k >= 3 && pop->d.index >= 0 && pop->d.index < nControllers && IsController( stack[k - 1] ) &&
+			( stack[k - 2] < 0.0f || IsController( stack[k - 2] ) ) && ( stack[k - 3] < 0.0f || IsController( stack[k - 3] ) );
+	default:
+		return false;
+	}
+}
+
 void CStudioHdr::RunFlexRules( const float *src, float *dest )
 {
 
@@ -1406,8 +1444,17 @@ void CStudioHdr::RunFlexRules( const float *src, float *dest )
 //*/
 		// debugoverlay->AddTextOverlay( GetAbsOrigin() + Vector( 0, 0, 64 ), i + 1, 0, "%2d:%d\n", i, prule->flex );
 
+		bool bValidRule = true;
 		for (int j = 0; j < prule->numops; j++)
 		{
+			// The ops and their operands come from the model file: check the stack depth
+			// and the controller/flex numbers before running an op, skip the rule if wrong.
+			if ( !IsFlexOpValid( pops, stack, k ) )
+			{
+				bValidRule = false;
+				break;
+			}
+
 			switch (pops->op)
 			{
 			case STUDIO_ADD: stack[k-2] = stack[k-2] + stack[k-1]; k--; break;
@@ -1584,7 +1631,8 @@ void CStudioHdr::RunFlexRules( const float *src, float *dest )
 			pops++;
 		}
 
-		dest[prule->flex] = stack[0];
+		if ( bValidRule && prule->flex >= 0 && prule->flex < numflexdesc() )
+			dest[prule->flex] = stack[0];
 /*
 		// JasonM hack
 		if ( nFlexRulesToRun == 0)					// 0 means run all rules correctly

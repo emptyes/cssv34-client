@@ -35,6 +35,7 @@
 #include "filesystem/IQueuedLoader.h"
 #include "tier1/lzmaDecoder.h"
 #include "functors.h"
+#include "studio_validate.h"
 
 // XXX remove this later. (henryg)
 #if 0 && defined(_DEBUG) && defined(_WIN32) && !defined(_X360)
@@ -505,7 +506,7 @@ private:
 	FSAsyncStatus_t LoadData( const char *pszFilename, const char *pszPathID, void *pDest, int nBytes, int nOffset, bool bAsync, FSAsyncControl_t *pControl );
 	vertexFileHeader_t *LoadVertexData( studiohdr_t *pStudioHdr );
 	vertexFileHeader_t *BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr, int nDataSize );
-	bool BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData, studiohdr_t *pStudioHdr, OptimizedModel::FileHeader_t *pVtxHdr );
+	bool BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData, studiohdr_t *pStudioHdr, OptimizedModel::FileHeader_t *pVtxHdr, int nDataSize );
 	void ConvertFlexData( studiohdr_t *pStudioHdr );
 
 	int ProcessPendingAsync( intp iAsync );
@@ -1630,8 +1631,9 @@ void CMDLCache::ConvertFlexData( studiohdr_t *pStudioHdr )
 
 //-----------------------------------------------------------------------------
 //
+
 //-----------------------------------------------------------------------------
-bool CMDLCache::BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData, studiohdr_t *pStudioHdr, OptimizedModel::FileHeader_t *pVtxHdr )
+bool CMDLCache::BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData, studiohdr_t *pStudioHdr, OptimizedModel::FileHeader_t *pVtxHdr, int nDataSize )
 {
 	if ( pVtxHdr )
 	{
@@ -1678,6 +1680,17 @@ bool CMDLCache::BuildHardwareData( MDLHandle_t handle, studiodata_t *pStudioData
 	}
 
 	MdlCacheMsg( "MDLCache: Load studiomdl %s\n", pStudioHdr->pszName() );
+
+	if ( IsPC() )
+	{
+		const char *pszError = NULL;
+		if ( !ValidateHardwareData( pStudioHdr, pVtxHdr, nDataSize, &pszError ) )
+		{
+			Warning( "MDLCache: %s has a corrupted .vtx file (bad %s), the model is not drawn\n", pStudioHdr->pszName(), pszError );
+			pStudioData->m_nFlags |= STUDIODATA_FLAGS_NO_STUDIOMESH;
+			return false;
+		}
+	}
 
 	Assert( GetVertexData( handle ) );
 
@@ -2018,6 +2031,15 @@ studiohdr_t *CMDLCache::UnserializeMDL( MDLHandle_t handle, void *pData, int nDa
 	}
 
 	studiohdr_t	*pStudioHdrIn = (studiohdr_t *)pData;
+
+	{
+		CStudioHdrValidator validator( pStudioHdrIn, nDataSize );
+		if ( !validator.Validate() )
+		{
+			Warning( "MDLCache: %s is corrupted (bad %s, %d), not loaded\n", GetModelName( handle ), validator.Error(), validator.ErrorIndex() );
+			return NULL;
+		}
+	}
 
 	if ( r_rootlod.GetInt() > 0 )
 	{
@@ -2942,7 +2964,7 @@ bool CMDLCache::ProcessDataIntoCache( MDLHandle_t handle, MDLCacheDataType_t typ
 		{
 			if ( bDataValid )
 			{
-				BuildHardwareData( handle, pStudioDataCurrent, pStudioHdrCurrent, (OptimizedModel::FileHeader_t *)pData );
+				BuildHardwareData( handle, pStudioDataCurrent, pStudioHdrCurrent, (OptimizedModel::FileHeader_t *)pData, nDataSize );
 			}
 			else
 			{
@@ -3308,79 +3330,6 @@ bool CMDLCache::SetAsyncLoad( MDLCacheDataType_t type, bool bAsync )
 //-----------------------------------------------------------------------------
 // Cache model's specified dynamic data
 //-----------------------------------------------------------------------------
-static bool ValidateVertexData( const vertexFileHeader_t *pHdr, int nDataSize, int rootLOD, bool bNeedsTangentS )
-{
-	if ( !pHdr || nDataSize < (int)sizeof( vertexFileHeader_t ) ||
-		pHdr->numLODs < 1 || pHdr->numLODs > MAX_NUM_LODS || rootLOD < 0 || rootLOD >= pHdr->numLODs )
-	{
-		return false;
-	}
-
-	for ( int lod = 0; lod < pHdr->numLODs; ++lod )
-	{
-		if ( pHdr->numLODVertexes[lod] < 0 ||
-			( lod > 0 && pHdr->numLODVertexes[lod] > pHdr->numLODVertexes[lod - 1] ) )
-		{
-			return false;
-		}
-	}
-
-	if ( pHdr->vertexDataStart < (int)sizeof( vertexFileHeader_t ) ||
-		pHdr->vertexDataStart > nDataSize || ( pHdr->vertexDataStart & 3 ) ||
-		pHdr->numLODVertexes[0] > ( nDataSize - pHdr->vertexDataStart ) / (int)sizeof( mstudiovertex_t ) )
-	{
-		return false;
-	}
-
-	if ( bNeedsTangentS &&
-		( pHdr->tangentDataStart < (int)sizeof( vertexFileHeader_t ) ||
-		  pHdr->tangentDataStart > nDataSize || ( pHdr->tangentDataStart & 3 ) ||
-		  pHdr->numLODVertexes[0] > ( nDataSize - pHdr->tangentDataStart ) / (int)sizeof( Vector4D ) ) )
-	{
-		return false;
-	}
-
-	uint64 vertexCount = (uint64)pHdr->numLODVertexes[rootLOD] + 1;
-	uint64 cacheLength = (uint64)pHdr->vertexDataStart +
-		vertexCount * ( sizeof( mstudiovertex_t ) + ( bNeedsTangentS ? sizeof( Vector4D ) : 0 ) );
-	if ( cacheLength > INT_MAX || pHdr->numFixups < 0 )
-	{
-		return false;
-	}
-	if ( !pHdr->numFixups )
-	{
-		return true;
-	}
-
-	if ( pHdr->fixupTableStart < (int)sizeof( vertexFileHeader_t ) ||
-		pHdr->fixupTableStart > nDataSize || ( pHdr->fixupTableStart & 3 ) ||
-		pHdr->numFixups > ( nDataSize - pHdr->fixupTableStart ) / (int)sizeof( vertexFileFixup_t ) )
-	{
-		return false;
-	}
-
-	const vertexFileFixup_t *pFixups = (const vertexFileFixup_t *)( (const byte *)pHdr + pHdr->fixupTableStart );
-	int target = 0;
-	for ( int i = 0; i < pHdr->numFixups; ++i )
-	{
-		const vertexFileFixup_t &fixup = pFixups[i];
-		if ( fixup.lod < 0 || fixup.lod >= MAX_NUM_LODS ||
-			fixup.sourceVertexID < 0 || fixup.sourceVertexID > pHdr->numLODVertexes[0] ||
-			fixup.numVertexes < 0 || fixup.numVertexes > pHdr->numLODVertexes[0] - fixup.sourceVertexID )
-		{
-			return false;
-		}
-		if ( fixup.lod >= rootLOD )
-		{
-			if ( fixup.numVertexes > pHdr->numLODVertexes[rootLOD] - target )
-			{
-				return false;
-			}
-			target += fixup.numVertexes;
-		}
-	}
-	return target == pHdr->numLODVertexes[rootLOD];
-}
 
 vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr, vertexFileHeader_t *pRawVvdHdr, int nDataSize )
 {
@@ -3445,6 +3394,16 @@ vertexFileHeader_t *CMDLCache::BuildAndCacheVertexData( studiohdr_t *pStudioHdr,
 	{
 		Warning( "Error Vertex File for '%s': invalid data ranges or fixups\n", pStudioHdr->pszName() );
 		return NULL;
+	}
+
+	if ( IsPC() )
+	{
+		const char *pszError = NULL;
+		if ( !ValidateVertexBones( pStudioHdr, pRawVvdHdr, rootLOD, &pszError ) )
+		{
+			Warning( "Error Vertex File for '%s': invalid %s\n", pStudioHdr->pszName(), pszError );
+			return NULL;
+		}
 	}
 
 	// determine final cache footprint, possibly truncated due to lod
