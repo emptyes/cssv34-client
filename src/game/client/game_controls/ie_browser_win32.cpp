@@ -40,6 +40,9 @@
 #ifndef DISPID_BEFORENAVIGATE2
 #define DISPID_BEFORENAVIGATE2 250
 #endif
+#ifndef DISPID_NAVIGATECOMPLETE2
+#define DISPID_NAVIGATECOMPLETE2 252
+#endif
 #ifndef DISPID_DOCUMENTCOMPLETE
 #define DISPID_DOCUMENTCOMPLETE 259
 #endif
@@ -122,6 +125,8 @@ public:
 	void Scroll( int nPixels );
 	void DisableDragging();
 	void WritePendingHTML();
+	void PollPendingHTML();
+	int GetHTMLState() const { return m_nHTMLState; }
 
 	// IUnknown
 	STDMETHODIMP QueryInterface( REFIID riid, void **ppv );
@@ -209,6 +214,9 @@ private:
 	DWORD				m_dwLastClickTick;	// GetTickCount() of the last click on the page
 	wchar_t				m_szPageHost[256];	// host of the page the game opened
 	BSTR				m_bstrPendingHTML;	// HTML text written into about:blank once it has loaded
+	bool				m_bNavCompleted;	// the last top level navigation has completed
+	DWORD				m_dwNavTick;		// GetTickCount() when it started
+	int					m_nHTMLState;		// see CIEBrowser::GetHTMLState
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -234,6 +242,9 @@ CIEBrowserHost::CIEBrowserHost()
 	m_dwLastClickTick = 0;
 	m_szPageHost[0] = 0;
 	m_bstrPendingHTML = NULL;
+	m_bNavCompleted = false;
+	m_dwNavTick = 0;
+	m_nHTMLState = 0;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -353,6 +364,24 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 		}
 		return S_OK;
 
+	case DISPID_NAVIGATECOMPLETE2:
+		// args (reversed): pDisp, URL; the top level document exists from here on
+		if ( pDispParams && pDispParams->cArgs >= 2 )
+		{
+			VARIANT &frame = pDispParams->rgvarg[1];
+			if ( frame.vt == VT_DISPATCH && frame.pdispVal && m_pBrowser )
+			{
+				IUnknown *pFrame = NULL, *pTop = NULL;
+				frame.pdispVal->QueryInterface( IID_IUnknown, (void **)&pFrame );
+				m_pBrowser->QueryInterface( IID_IUnknown, (void **)&pTop );
+				if ( pFrame && pFrame == pTop )
+					m_bNavCompleted = true;
+				if ( pFrame ) pFrame->Release();
+				if ( pTop ) pTop->Release();
+			}
+		}
+		return S_OK;
+
 	case DISPID_DOCUMENTCOMPLETE:
 		// args (reversed): pDisp, URL
 		if ( m_bstrPendingHTML && pDispParams && pDispParams->cArgs >= 2 )
@@ -370,7 +399,10 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 				if ( pTop ) pTop->Release();
 			}
 			if ( bTopLevel )
+			{
+				m_bNavCompleted = true;
 				WritePendingHTML();
+			}
 		}
 		DisableDragging();
 		return S_OK;
@@ -597,6 +629,9 @@ void CIEBrowserHost::Navigate( const char *pszURL, BSTR bstrHTML )
 	if ( m_bstrPendingHTML )
 		SysFreeString( m_bstrPendingHTML );
 	m_bstrPendingHTML = bstrHTML;
+	m_nHTMLState = bstrHTML ? 1 : 0;
+	m_bNavCompleted = false;
+	m_dwNavTick = GetTickCount();
 
 	m_pBrowser->Navigate2( &url, &empty, &empty, &empty, &empty );
 	VariantClear( &url );
@@ -645,6 +680,8 @@ void CIEBrowserHost::ReleaseBitmap()
 
 bool CIEBrowserHost::Render( unsigned char *pRGBA, int nWide, int nTall )
 {
+	PollPendingHTML();
+
 	if ( !m_pViewObject || !pRGBA || nWide <= 0 || nTall <= 0 )
 		return false;
 
@@ -839,12 +876,17 @@ void CIEBrowserHost::WritePendingHTML()
 			bstrHTML = NULL;
 			SafeArrayUnaccessData( psa );
 
-			pDoc->write( psa );
+			HRESULT hr = pDoc->write( psa );
 			pDoc->close();
+			m_nHTMLState = SUCCEEDED( hr ) ? 2 : -3;
 		}
+		else
+			m_nHTMLState = -2;
 		if ( psa )
 			SafeArrayDestroy( psa );	// frees the BSTR
 	}
+	else
+		m_nHTMLState = -1;	// no HTML document
 	if ( pDoc )
 		pDoc->Release();
 	if ( pDocDisp )
@@ -852,10 +894,35 @@ void CIEBrowserHost::WritePendingHTML()
 	SysFreeString( bstrHTML );
 }
 
+// In case the DocumentComplete event of about:blank doesn't come (or isn't recognized
+// as the top level one): write the text once about:blank is loaded and idle
+void CIEBrowserHost::PollPendingHTML()
+{
+	if ( !m_bstrPendingHTML || !m_pBrowser )
+		return;
+
+	// don't take the state of the previous page for the new one
+	if ( !m_bNavCompleted && GetTickCount() - m_dwNavTick < 1000 )
+		return;
+
+	VARIANT_BOOL bBusy = VARIANT_TRUE;
+	READYSTATE rs = READYSTATE_UNINITIALIZED;
+	if ( FAILED( m_pBrowser->get_Busy( &bBusy ) ) || bBusy ||
+		FAILED( m_pBrowser->get_ReadyState( &rs ) ) || rs != READYSTATE_COMPLETE )
+		return;
+
+	BSTR bstrLocation = NULL;
+	bool bBlank = SUCCEEDED( m_pBrowser->get_LocationURL( &bstrLocation ) ) && bstrLocation &&
+		!_wcsnicmp( bstrLocation, L"about:", 6 );
+	SysFreeString( bstrLocation );
+	if ( bBlank )
+		WritePendingHTML();
+}
+
 //-----------------------------------------------------------------------------
 // CIEBrowser
 //-----------------------------------------------------------------------------
-CIEBrowser::CIEBrowser() : m_pHost( 0 )
+CIEBrowser::CIEBrowser() : m_pHost( 0 ), m_bHTMLConvertFailed( false )
 {
 }
 
@@ -892,6 +959,7 @@ void CIEBrowser::Shutdown()
 
 void CIEBrowser::Navigate( const char *pszURL )
 {
+	m_bHTMLConvertFailed = false;
 	if ( m_pHost )
 		m_pHost->Navigate( pszURL );
 }
@@ -933,8 +1001,22 @@ static BSTR HTMLTextToBSTR( const char *pszHTML )
 
 void CIEBrowser::NavigateHTML( const char *pszHTML )
 {
-	if ( m_pHost && pszHTML )
-		m_pHost->NavigateHTML( HTMLTextToBSTR( pszHTML ) );
+	if ( !m_pHost || !pszHTML )
+		return;
+
+	BSTR bstr = HTMLTextToBSTR( pszHTML );
+	m_bHTMLConvertFailed = false;
+	if ( bstr )
+		m_pHost->NavigateHTML( bstr );
+	else
+		m_bHTMLConvertFailed = true;
+}
+
+int CIEBrowser::GetHTMLState() const
+{
+	if ( m_bHTMLConvertFailed )
+		return -4;
+	return m_pHost ? m_pHost->GetHTMLState() : 0;
 }
 
 void CIEBrowser::SetSize( int nWide, int nTall )
@@ -969,12 +1051,13 @@ void CIEBrowser::Scroll( int nPixels )
 #else // !_WIN32
 
 // no WebBrowser control: the browser can't be created, callers fall back to text
-CIEBrowser::CIEBrowser() : m_pHost( 0 ) {}
+CIEBrowser::CIEBrowser() : m_pHost( 0 ), m_bHTMLConvertFailed( false ) {}
 CIEBrowser::~CIEBrowser() {}
 bool CIEBrowser::Init( int, int ) { return false; }
 void CIEBrowser::Shutdown() {}
 void CIEBrowser::Navigate( const char * ) {}
 void CIEBrowser::NavigateHTML( const char * ) {}
+int CIEBrowser::GetHTMLState() const { return 0; }
 void CIEBrowser::SetSize( int, int ) {}
 bool CIEBrowser::Render( unsigned char *, int, int ) { return false; }
 void CIEBrowser::MouseMove( int, int ) {}

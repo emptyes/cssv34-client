@@ -32,6 +32,9 @@ public:
 	void Navigate( const char *pszURL );
 	// shows HTML text (an MOTD sent as text, not as a URL) in about:blank
 	void NavigateHTML( const char *pszHTML );
+	// HTML text: 0 none, 1 waiting for about:blank, 2 written, < 0 failed
+	// (-1 no HTML document, -2 no memory, -3 write failed, -4 text not convertible)
+	int GetHTMLState() const;
 	void SetSize( int nWide, int nTall );
 
 	// renders the current view into pRGBA (nWide * nTall * 4 bytes, opaque RGBA)
@@ -44,6 +47,7 @@ public:
 
 private:
 	CIEBrowserHost *m_pHost;
+	bool m_bHTMLConvertFailed;
 };
 
 #endif // IE_BROWSER_WIN32_H

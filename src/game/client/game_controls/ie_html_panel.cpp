@@ -29,6 +29,7 @@ CIEHTMLPanel::CIEHTMLPanel( Panel *pParent, const char *pszName ) : BaseClass( p
 	m_nFrameWide = m_nFrameTall = 0;
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
+	m_nLastHTMLState = 0;
 
 	SetPaintBackgroundEnabled( false );
 	SetMouseInputEnabled( true );
@@ -101,6 +102,8 @@ bool CIEHTMLPanel::OpenHTML( const char *pszHTML )
 
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
+	m_nLastHTMLState = 0;
+	DevMsg( "HTML MOTD: showing %d bytes of HTML text\n", (int)V_strlen( pszHTML ) );
 	m_pBrowser->NavigateHTML( pszHTML );
 	return true;
 }
@@ -130,6 +133,17 @@ void CIEHTMLPanel::OnThink()
 
 	if ( !m_pBrowser || Plat_FloatTime() < m_flNextRender )
 		return;
+
+	// diagnostics of HTML text MOTDs (developer 1)
+	int nHTMLState = m_pBrowser->GetHTMLState();
+	if ( nHTMLState != m_nLastHTMLState )
+	{
+		m_nLastHTMLState = nHTMLState;
+		static const char *s_pszStates[] = { "text not convertible", "write failed", "no memory", "no HTML document", "none", "waiting for about:blank", "written" };
+		if ( nHTMLState >= -4 && nHTMLState <= 2 )
+			DevMsg( "HTML MOTD: text state: %s\n", s_pszStates[ nHTMLState + 4 ] );
+	}
+
 	m_flNextRender = Plat_FloatTime() + IE_HTML_RENDER_INTERVAL;
 
 	int wide, tall;

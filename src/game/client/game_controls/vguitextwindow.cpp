@@ -298,7 +298,10 @@ void CTextWindow::ShowIndex( const char *entry )
 	{
 		ClientModeShared *mode = ( ClientModeShared * )GetClientModeNormal();
 		if ( cl_disablehtmlmotd.GetBool() || !mode->IsHTMLInfoPanelAllowed() || !ShowHTMLWithBrowser( data ) )
+		{
+			DevMsg( "HTML MOTD: HTML text shown as its text version\n" );
 			ShowFallbackText();
+		}
 		return;
 	}
 

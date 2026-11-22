@@ -58,6 +58,7 @@ private:
 	int						m_nFrameWide, m_nFrameTall;
 	bool					m_bHasFrame;
 	float					m_flNextRender;
+	int						m_nLastHTMLState;
 };
 
 #endif // IE_HTML_PANEL_H
