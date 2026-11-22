@@ -1841,6 +1841,51 @@ static void StaticRunListenServer( void *arg )
 
 
 
+#if defined( _WIN32 ) && !defined( _X360 )
+// written next to the crash report when the game crashes, read and removed at the next start
+#define CRASH_MARKER_FILE "last_crash.txt"
+
+//-----------------------------------------------------------------------------
+// Purpose: tells the player at start that the previous session crashed and where
+//          the crash report is (before the game window exists, so it is visible)
+//-----------------------------------------------------------------------------
+static void ReportPreviousCrash()
+{
+	FILE *fp = fopen( CRASH_MARKER_FILE, "r" );
+	if ( !fp )
+		return;
+
+	char szPath[MAX_PATH] = "";
+	char szCode[32] = "";
+	if ( fgets( szPath, sizeof( szPath ), fp ) )
+		fgets( szCode, sizeof( szCode ), fp );
+	fclose( fp );
+	remove( CRASH_MARKER_FILE );
+
+	for ( char *p = szPath; *p; p++ )
+	{
+		if ( *p == '\r' || *p == '\n' )
+			*p = 0;
+	}
+	for ( char *p = szCode; *p; p++ )
+	{
+		if ( *p == '\r' || *p == '\n' )
+			*p = 0;
+	}
+	if ( !szPath[0] )
+		return;
+
+	char szMessage[1024];
+	V_snprintf( szMessage, sizeof( szMessage ),
+		"The game crashed last time (exception %s).\n\n"
+		"A crash report was saved to:\n%s\n\n"
+		"Please send this file to the client developers together with the game version "
+		"and a description of what you were doing (server, map, action).",
+		szCode[0] ? szCode : "unknown", szPath );
+	MessageBoxA( NULL, szMessage, "Counter-Strike: Source", MB_OK | MB_ICONINFORMATION );
+}
+#endif
+
 // This function is set as the crash handler for unhandled exceptions and as the minidump
 // handler for to be used by all of tier0's crash recording. This function
 // adds a game-specific minidump comment and ensures that the SteamAPI function is
@@ -1861,8 +1906,27 @@ extern "C" void __cdecl WriteSteamMiniDumpWithComment( unsigned int uStructuredE
 	SteamAPI_WriteMiniDump( uStructuredExceptionCode, pExceptionInfo, build_number() );
 #if defined( _WIN32 )
 	// stub_steam does not write minidumps, so write one ourselves (next to hl2_launcher.exe)
-	WriteMiniDumpUsingExceptionInfo( uStructuredExceptionCode, pExceptionInfo,
-		0x00000041 /* MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory */, pszFilenameSuffix );
+	tchar szDumpFile[MAX_PATH];
+	bool bWritten = WriteMiniDumpUsingExceptionInfo( uStructuredExceptionCode, pExceptionInfo,
+		0x00000041 /* MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory */, pszFilenameSuffix, szDumpFile );
+
+	// Without this the game just disappears. A message box during the crash could stay
+	// hidden behind a fullscreen game, so remember the report and tell the player at the
+	// next start (ReportPreviousCrash). The report can be analyzed with the debug symbols
+	// published with the build (cssv34_win64_pdb.7z).
+	// Asserts and other non-fatal reports also come here, with a filename suffix.
+	if ( bWritten && !pszFilenameSuffix && pExceptionInfo )
+	{
+		char szFullPath[MAX_PATH];
+		if ( !GetFullPathNameA( szDumpFile, sizeof( szFullPath ), szFullPath, NULL ) )
+			V_strncpy( szFullPath, szDumpFile, sizeof( szFullPath ) );
+		FILE *fp = fopen( CRASH_MARKER_FILE, "w" );
+		if ( fp )
+		{
+			fprintf( fp, "%s\n0x%08X\n", szFullPath, uStructuredExceptionCode );
+			fclose( fp );
+		}
+	}
 #endif
 	// Clear DSound Buffers so the sound doesn't loop while the game shuts down
 	try
@@ -1911,6 +1975,8 @@ int CEngineAPI::Run()
 	// of catching exceptions that aren't in callbacks.
 	// The unhandled exception filter will also catch crashes in threads that
 	// don't have a try/catch or __try/__except block.
+	ReportPreviousCrash();
+
 	bool noMinidumps = CommandLine()->FindParm( "-nominidumps");
 	if ( !noMinidumps )
 		MinidumpSetUnhandledExceptionFunction( WriteSteamMiniDumpWithComment );

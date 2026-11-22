@@ -70,6 +70,10 @@ Read [Build Instructions](https://github.com/sl1mshady-cs/cssv34-client/blob/mas
   other data out of range is not loaded (the client disconnects with "Map ... is corrupted"),
   broken optional data (a face's lightmap, overlays, detail props) is skipped.
   `src/devtools/check_bsp.py <maps/*.bsp>` runs the same checks without the game.
+- **Crashes.** When the game crashes, a crash report (`hl2_launcher_*.mdmp`) is saved next to
+  `hl2_launcher.exe`, and the next start shows where it is. The report can be analyzed with the
+  debug symbols of the same build (`cssv34_win64_pdb.7z` in the release). Start the game with
+  `-nominidumps` to disable it.
 - **Configs** are never executed from a map's pakfile (a map could otherwise replace a config that
   is executed from a bind).
 
