@@ -26,6 +26,18 @@ jobs:
         sudo apt-get install -y --no-install-recommends g++ pkg-config libsdl2-dev libfreetype-dev \
           libfontconfig-dev libopenal-dev libjpeg-dev libpng-dev libcurl4-gnutls-dev libbz2-dev libedit-dev
 
+    # The checks of downloaded files must accept real content and reject broken files
+    - name: File validation self-tests
+      run: |
+        cd src
+        g++ -std=c++17 -O2 -DPOSIX=1 -D_POSIX=1 -DLINUX=1 -D_LINUX=1 -DPLATFORM_POSIX=1 -DGNUC -DCOMPILER_GCC=1 \
+          -DPLATFORM_64BITS=1 -DNDEBUG -Ipublic -Ipublic/tier0 -Ipublic/tier1 -Ipublic/mathlib -Icommon -Idatacache \
+          devtools/test_studio_validate.cpp -o /tmp/test_studio_validate
+        /tmp/test_studio_validate
+        g++ -std=c++17 -O2 -DPOSIX=1 -D_POSIX=1 -DLINUX=1 -D_LINUX=1 -DPLATFORM_POSIX=1 -DGNUC -DCOMPILER_GCC=1 \
+          -DPLATFORM_64BITS=1 -DNDEBUG -Ipublic -Ipublic/tier0 -Ipublic/tier1 -Ipublic/mathlib -Icommon -Idatacache \
+          devtools/check_mdl.cpp -o /tmp/check_mdl
+
     - name: Build linux-amd64 (release)
       run: |
         cd src
