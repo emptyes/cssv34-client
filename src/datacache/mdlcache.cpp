@@ -3046,6 +3046,21 @@ bool CMDLCache::ProcessDataIntoCache( MDLHandle_t handle, MDLCacheDataType_t typ
 					}
 				}
 
+				// the animations read their data from the block with offsets from the model
+				if ( IsPC() )
+				{
+					CStudioHdrValidator validator( pStudioHdrCurrent, pData, nDataSize );
+					if ( !validator.ValidateAnimBlock( iAnimBlock ) )
+					{
+						Warning( "MDLCache: %s has corrupted animation data in block %d (bad %s, %d), animations not loaded\n",
+							pStudioHdrCurrent->pszName(), iAnimBlock, validator.Error(), validator.ErrorIndex() );
+						// the caller frees the buffer when this returns false
+						if ( pStudioDataCurrent->m_pAnimBlock )
+							pStudioDataCurrent->m_pAnimBlock[iAnimBlock] = NULL;
+						return false;
+					}
+				}
+
 				CacheData( &pStudioDataCurrent->m_pAnimBlock[iAnimBlock], pData, nDataSize, pCacheName, MDLCACHE_ANIMBLOCK, MakeCacheID( handle, MDLCACHE_ANIMBLOCK) );
 			}
 			else

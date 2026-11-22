@@ -31,8 +31,11 @@ class CStudioHdrValidator
 {
 public:
 	CStudioHdrValidator( const studiohdr_t *pHdr, int nSize ) : m_pHdr( pHdr ), m_pBase( (const byte *)pHdr ), m_nSize( nSize ), m_pszError( NULL ), m_nIndex( 0 ) {}
+	// for a block of an external .ani file: offsets into the block, the model is already checked
+	CStudioHdrValidator( const studiohdr_t *pHdr, const void *pBlock, int nBlockSize ) : m_pHdr( pHdr ), m_pBase( (const byte *)pBlock ), m_nSize( nBlockSize ), m_pszError( NULL ), m_nIndex( 0 ) {}
 
 	bool Validate();
+	bool ValidateAnimBlock( int nBlock );
 	const char *Error() const { return m_pszError; }
 	int ErrorIndex() const { return m_nIndex; }
 
@@ -268,6 +271,13 @@ bool CStudioHdrValidator::ValidateAnims()
 	if ( h->numanimblocks && ( !String( h, h->szanimblocknameindex ) ||
 		!Range( h, h->animblockindex, h->numanimblocks, sizeof( mstudioanimblock_t ) ) ) )
 		return Fail( "animation block table", h->numanimblocks );
+	for ( int i = 1; i < h->numanimblocks; i++ )
+	{
+		// the block is read from the .ani file at datastart, dataend - datastart bytes
+		const mstudioanimblock_t *pBlock = h->pAnimBlock( i );
+		if ( pBlock->datastart < 0 || pBlock->dataend < pBlock->datastart )
+			return Fail( "animation block", i );
+	}
 
 	for ( int i = 0; i < h->numlocalanim; i++ )
 	{
@@ -316,6 +326,46 @@ bool CStudioHdrValidator::ValidateAnims()
 				const mstudioikrule_t *pRule = (const mstudioikrule_t *)( (const byte *)pDesc + nIKRuleOffset ) + r;
 				if ( (unsigned)pRule->chain >= (unsigned)h->numikchains || pRule->bone < -1 || pRule->bone >= h->numbones ||
 					!OptString( pRule, pRule->szattachmentindex ) )
+					return Fail( "animation IK rule", i );
+			}
+		}
+	}
+	return true;
+}
+
+// Checks the data of one block of the .ani file (m_pBase/m_nSize are the block): the
+// animation data and IK rules of the animations and sections that use the block.
+bool CStudioHdrValidator::ValidateAnimBlock( int nBlock )
+{
+	const studiohdr_t *h = m_pHdr;
+	for ( int i = 0; i < h->numlocalanim; i++ )
+	{
+		const mstudioanimdesc_t *pDesc = h->pLocalAnimdesc( i );
+		if ( pDesc->sectionframes > 0 )
+		{
+			int nSections = pDesc->numframes / pDesc->sectionframes + 2;
+			for ( int s = 0; s < nSections; s++ )
+			{
+				const mstudioanimsections_t *pSection = pDesc->pSection( s );
+				if ( pSection->animblock == nBlock && !ValidateAnimData( pDesc, m_pBase + pSection->animindex ) )
+					return Fail( "animation section data", i );
+			}
+		}
+		else if ( pDesc->animblock == nBlock && !( pDesc->flags & STUDIO_ALLZEROS ) )
+		{
+			if ( pDesc->animindex < 0 || !ValidateAnimData( pDesc, m_pBase + pDesc->animindex ) )
+				return Fail( "animation data", i );
+		}
+
+		// IK rules in the block (mstudioanimdesc_t::pIKRule)
+		if ( pDesc->animblock == nBlock && pDesc->numikrules && !pDesc->ikruleindex && pDesc->animblockikruleindex )
+		{
+			if ( pDesc->animblockikruleindex < 0 || !Range( m_pBase, pDesc->animblockikruleindex, pDesc->numikrules, sizeof( mstudioikrule_t ) ) )
+				return Fail( "animation IK rules", i );
+			for ( int r = 0; r < pDesc->numikrules; r++ )
+			{
+				const mstudioikrule_t *pRule = (const mstudioikrule_t *)( m_pBase + pDesc->animblockikruleindex ) + r;
+				if ( (unsigned)pRule->chain >= (unsigned)h->numikchains || pRule->bone < -1 || pRule->bone >= h->numbones )
 					return Fail( "animation IK rule", i );
 			}
 		}

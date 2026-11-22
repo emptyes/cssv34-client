@@ -1,6 +1,6 @@
 //========= cssv34-client: model checker ======================================//
 //
-// Purpose: Checks .mdl/.vvd/.vtx files with the same code the client uses when
+// Purpose: Checks .mdl/.vvd/.vtx/.ani files with the same code the client uses when
 //          it loads a model (datacache/studio_validate.h), without the game:
 //
 //              check_mdl models/player/ct_urban.mdl models/weapons/*.mdl
@@ -71,6 +71,30 @@ static int CheckModel( const std::string &mdlPath )
 
 	std::string base = mdlPath.substr( 0, mdlPath.size() - 4 );
 	std::string notes;
+
+	// animation blocks in the .ani file next to the model (block 0 is unused)
+	if ( pHdr->numanimblocks > 1 )
+	{
+		std::vector<unsigned char> ani;
+		if ( !ReadFile( base + ".ani", ani ) )
+			notes += " (no .ani)";
+		for ( int i = 1; i < pHdr->numanimblocks && !ani.empty(); i++ )
+		{
+			const mstudioanimblock_t *pBlock = pHdr->pAnimBlock( i );
+			if ( pBlock->dataend > (int)ani.size() )
+			{
+				printf( "%s: ERROR: .ani: block %d is outside the file\n", mdlPath.c_str(), i );
+				return 1;
+			}
+			std::vector<unsigned char> block( ani.begin() + pBlock->datastart, ani.begin() + pBlock->dataend );
+			CStudioHdrValidator blockValidator( pHdr, block.data(), (int)block.size() );
+			if ( !blockValidator.ValidateAnimBlock( i ) )
+			{
+				printf( "%s: ERROR: .ani block %d: bad %s (%d)\n", mdlPath.c_str(), i, blockValidator.Error(), blockValidator.ErrorIndex() );
+				return 1;
+			}
+		}
+	}
 
 	if ( pHdr->numbodyparts )
 	{
