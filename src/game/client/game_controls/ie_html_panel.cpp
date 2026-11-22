@@ -55,39 +55,54 @@ bool CIEHTMLPanel::IsAvailable()
 #endif
 }
 
-bool CIEHTMLPanel::OpenURL( const char *pszURL )
+bool CIEHTMLPanel::CreateBrowser()
 {
 #ifdef _WIN32
-	if ( !pszURL || !pszURL[0] )
+	if ( m_pBrowser )
+		return true;
+
+	// don't retry every time the MOTD opens if the control is missing on this system
+	if ( m_bBrowserFailed )
 		return false;
 
-	if ( !m_pBrowser )
+	int wide, tall;
+	GetSize( wide, tall );
+
+	m_pBrowser = new CIEBrowser();
+	if ( !m_pBrowser->Init( clamp( wide, 1, IE_HTML_MAX_SIZE ), clamp( tall, 1, IE_HTML_MAX_SIZE ) ) )
 	{
-		// don't retry every time the MOTD opens if the control is missing on this system
-		if ( m_bBrowserFailed )
-			return false;
-
-		int wide, tall;
-		GetSize( wide, tall );
-
-		m_pBrowser = new CIEBrowser();
-		if ( !m_pBrowser->Init( clamp( wide, 1, IE_HTML_MAX_SIZE ), clamp( tall, 1, IE_HTML_MAX_SIZE ) ) )
-		{
-			Warning( "HTML MOTD: the Windows WebBrowser control is not available\n" );
-			delete m_pBrowser;
-			m_pBrowser = NULL;
-			m_bBrowserFailed = true;
-			return false;
-		}
+		Warning( "HTML MOTD: the Windows WebBrowser control is not available\n" );
+		delete m_pBrowser;
+		m_pBrowser = NULL;
+		m_bBrowserFailed = true;
+		return false;
 	}
+	return true;
+#else
+	return false;
+#endif
+}
+
+bool CIEHTMLPanel::OpenURL( const char *pszURL )
+{
+	if ( !pszURL || !pszURL[0] || !CreateBrowser() )
+		return false;
 
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
 	m_pBrowser->Navigate( pszURL );
 	return true;
-#else
-	return false;
-#endif
+}
+
+bool CIEHTMLPanel::OpenHTML( const char *pszHTML )
+{
+	if ( !pszHTML || !pszHTML[0] || !CreateBrowser() )
+		return false;
+
+	m_bHasFrame = false;
+	m_flNextRender = 0.0f;
+	m_pBrowser->NavigateHTML( pszHTML );
+	return true;
 }
 
 void CIEHTMLPanel::CloseBrowser()

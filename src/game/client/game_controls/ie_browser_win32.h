@@ -28,8 +28,10 @@ public:
 	void Shutdown();
 	bool IsValid() const { return m_pHost != 0; }
 
-	// UTF-8 URL (http://, https://, file://, about:blank)
+	// UTF-8 URL (http://, https://, about:blank)
 	void Navigate( const char *pszURL );
+	// shows HTML text (an MOTD sent as text, not as a URL) in about:blank
+	void NavigateHTML( const char *pszHTML );
 	void SetSize( int nWide, int nTall );
 
 	// renders the current view into pRGBA (nWide * nTall * 4 bytes, opaque RGBA)

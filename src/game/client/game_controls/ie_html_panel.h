@@ -30,6 +30,8 @@ public:
 
 	// creates the browser on first use; false if it can't be created
 	bool OpenURL( const char *pszURL );
+	// shows HTML text (an MOTD sent as text, not as a URL); same rights as a web page
+	bool OpenHTML( const char *pszHTML );
 
 	// destroys the browser (stops scripts, frees memory); OpenURL creates it again
 	void CloseBrowser();
@@ -46,6 +48,7 @@ protected:
 
 private:
 	void GetCursorLocal( int &x, int &y );
+	bool CreateBrowser();
 
 	CIEBrowser				*m_pBrowser;
 	bool					m_bBrowserFailed;

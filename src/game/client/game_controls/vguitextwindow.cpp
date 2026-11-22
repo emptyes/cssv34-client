@@ -199,6 +199,31 @@ bool CTextWindow::ShowURLWithBrowser( const char *URL )
 		return false;
 
 	Q_strncpy( m_szBrowserURL, URL, sizeof( m_szBrowserURL ) );
+	m_BrowserHTML.Clear();
+	m_pHTMLMessage->SetVisible( false );
+	m_pTextMessage->SetVisible( false );
+	m_pBrowserMessage->SetVisible( true );
+	m_bShownURL = true;
+	return true;
+}
+
+// HTML text the server sends as MOTD (instead of a URL), shown in about:blank of the
+// WebBrowser control with the rights of a web page. A file:// copy on disk would run in
+// the Local Machine zone, where the page's scripts could read the player's files.
+bool CTextWindow::ShowHTMLWithBrowser( const char *pszHTML )
+{
+	if ( !CIEHTMLPanel::IsAvailable() || !pszHTML || !pszHTML[0] )
+		return false;
+
+	int x, y, wide, tall;
+	m_pHTMLMessage->GetBounds( x, y, wide, tall );
+	m_pBrowserMessage->SetBounds( x, y, wide, tall );
+
+	if ( !m_pBrowserMessage->OpenHTML( pszHTML ) )
+		return false;
+
+	m_szBrowserURL[0] = '\0';
+	m_BrowserHTML = pszHTML;
 	m_pHTMLMessage->SetVisible( false );
 	m_pTextMessage->SetVisible( false );
 	m_pBrowserMessage->SetVisible( true );
@@ -267,6 +292,16 @@ void CTextWindow::ShowIndex( const char *entry )
 		return;
 	}
 
+	// without Steam's HTML surface the page is shown by the WebBrowser control,
+	// which gets the text directly (see ShowHTMLWithBrowser)
+	if ( !steamapicontext || !steamapicontext->SteamHTMLSurface() )
+	{
+		ClientModeShared *mode = ( ClientModeShared * )GetClientModeNormal();
+		if ( cl_disablehtmlmotd.GetBool() || !mode->IsHTMLInfoPanelAllowed() || !ShowHTMLWithBrowser( data ) )
+			ShowFallbackText();
+		return;
+	}
+
 	// data is a HTML, we have to write to a file and then load the file
 	FileHandle_t hFile = g_pFullFileSystem->Open( TEMP_HTML_FILE, "wb", "DEFAULT_WRITE_PATH" );
 
@@ -327,6 +362,7 @@ void CTextWindow::Update( void )
 		m_pHTMLMessage->SetVisible( false );
 	m_pBrowserMessage->SetVisible( false );
 	m_szBrowserURL[0] = '\0';
+	m_BrowserHTML.Clear();
 	m_pTextMessage->SetVisible( false );
 
 	if ( m_nContentType == TYPE_INDEX )
@@ -458,8 +494,13 @@ void CTextWindow::ShowPanel( bool bShow )
 		SetMouseInputEnabled( true );
 
 		// the browser is destroyed while the panel is hidden; reopen its page
-		if ( m_szBrowserURL[0] && m_pBrowserMessage->IsVisible() && !m_pBrowserMessage->HasBrowser() )
-			m_pBrowserMessage->OpenURL( m_szBrowserURL );
+		if ( m_pBrowserMessage->IsVisible() && !m_pBrowserMessage->HasBrowser() )
+		{
+			if ( m_szBrowserURL[0] )
+				m_pBrowserMessage->OpenURL( m_szBrowserURL );
+			else if ( !m_BrowserHTML.IsEmpty() )
+				m_pBrowserMessage->OpenHTML( m_BrowserHTML.Get() );
+		}
 	}
 	else
 	{

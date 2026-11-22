@@ -25,6 +25,7 @@
 #include <shellapi.h>
 #include <wchar.h>
 #include <string.h>
+#include <ctype.h>
 
 #ifdef _MSC_VER
 #pragma comment( lib, "ole32.lib" )
@@ -113,12 +114,14 @@ public:
 	bool Create( int nWide, int nTall );
 	void Destroy();
 
-	void Navigate( const char *pszURL );
+	void Navigate( const char *pszURL, BSTR bstrHTML = NULL );
+	void NavigateHTML( BSTR bstrHTML );
 	void SetSize( int nWide, int nTall );
 	bool Render( unsigned char *pRGBA, int nWide, int nTall );
 	void PostMouse( UINT msg, WPARAM wParam, int x, int y );
 	void Scroll( int nPixels );
 	void DisableDragging();
+	void WritePendingHTML();
 
 	// IUnknown
 	STDMETHODIMP QueryInterface( REFIID riid, void **ppv );
@@ -205,8 +208,7 @@ private:
 	bool				m_bButtonDown;
 	DWORD				m_dwLastClickTick;	// GetTickCount() of the last click on the page
 	wchar_t				m_szPageHost[256];	// host of the page the game opened
-	bool				m_bLocalPage;		// the game opened a local file (HTML MOTD text of the server)
-	bool				m_bExpectLocalNav;	// that navigation hasn't started yet
+	BSTR				m_bstrPendingHTML;	// HTML text written into about:blank once it has loaded
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -231,8 +233,7 @@ CIEBrowserHost::CIEBrowserHost()
 	m_bButtonDown = false;
 	m_dwLastClickTick = 0;
 	m_szPageHost[0] = 0;
-	m_bLocalPage = false;
-	m_bExpectLocalNav = false;
+	m_bstrPendingHTML = NULL;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -349,14 +350,28 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 			VariantInit( pVarResult );
 			pVarResult->vt = VT_I4;
 			pVarResult->lVal = DLCTL_DLIMAGES | DLCTL_SILENT | DLCTL_NO_DLACTIVEXCTLS | DLCTL_NO_RUNACTIVEXCTLS;
-			// a local file runs in the Local Machine zone, where scripts may read local
-			// files: the HTML text a server sends as MOTD is shown without scripts
-			if ( m_bLocalPage )
-				pVarResult->lVal |= DLCTL_NO_SCRIPTS | DLCTL_NO_JAVA;
 		}
 		return S_OK;
 
 	case DISPID_DOCUMENTCOMPLETE:
+		// args (reversed): pDisp, URL
+		if ( m_bstrPendingHTML && pDispParams && pDispParams->cArgs >= 2 )
+		{
+			// the top level about:blank has loaded: write the server's HTML into it
+			VARIANT &frame = pDispParams->rgvarg[1];
+			bool bTopLevel = false;
+			if ( frame.vt == VT_DISPATCH && frame.pdispVal && m_pBrowser )
+			{
+				IUnknown *pFrame = NULL, *pTop = NULL;
+				frame.pdispVal->QueryInterface( IID_IUnknown, (void **)&pFrame );
+				m_pBrowser->QueryInterface( IID_IUnknown, (void **)&pTop );
+				bTopLevel = pFrame && pFrame == pTop;
+				if ( pFrame ) pFrame->Release();
+				if ( pTop ) pTop->Release();
+			}
+			if ( bTopLevel )
+				WritePendingHTML();
+		}
 		DisableDragging();
 		return S_OK;
 
@@ -391,19 +406,8 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 			// The page comes from the server: it may only lead to web pages. Other schemes
 			// (file:, res:, protocols of installed programs such as ms-msdt: or search-ms:)
 			// are cancelled, in frames too, so a page can't open local files or programs.
-			// The only local file is the one the game itself opens (see Navigate).
-			if ( !pszURL )
+			if ( !pszURL || !IsAllowedPanelURL( pszURL ) )
 			{
-				*cancel.pboolVal = VARIANT_TRUE;
-				return S_OK;
-			}
-			if ( !IsAllowedPanelURL( pszURL ) )
-			{
-				if ( bTopLevel && m_bExpectLocalNav && !_wcsnicmp( pszURL, L"file:", 5 ) )
-				{
-					m_bExpectLocalNav = false;
-					return S_OK;
-				}
 				*cancel.pboolVal = VARIANT_TRUE;
 				return S_OK;
 			}
@@ -510,6 +514,12 @@ bool CIEBrowserHost::Create( int nWide, int nTall )
 
 void CIEBrowserHost::Destroy()
 {
+	if ( m_bstrPendingHTML )
+	{
+		SysFreeString( m_bstrPendingHTML );
+		m_bstrPendingHTML = NULL;
+	}
+
 	if ( m_pConnectionPoint )
 	{
 		if ( m_dwAdviseCookie )
@@ -562,18 +572,15 @@ void CIEBrowserHost::Destroy()
 	}
 }
 
-void CIEBrowserHost::Navigate( const char *pszURL )
+void CIEBrowserHost::Navigate( const char *pszURL, BSTR bstrHTML )
 {
-	if ( !m_pBrowser || !pszURL || !pszURL[0] )
-		return;
-
-	int nChars = MultiByteToWideChar( CP_UTF8, 0, pszURL, -1, NULL, 0 );
-	if ( nChars <= 0 )
-		return;
-
-	BSTR bstrURL = SysAllocStringLen( NULL, nChars - 1 );
+	int nChars = ( m_pBrowser && pszURL && pszURL[0] ) ? MultiByteToWideChar( CP_UTF8, 0, pszURL, -1, NULL, 0 ) : 0;
+	BSTR bstrURL = nChars > 0 ? SysAllocStringLen( NULL, nChars - 1 ) : NULL;
 	if ( !bstrURL )
+	{
+		SysFreeString( bstrHTML );
 		return;
+	}
 	MultiByteToWideChar( CP_UTF8, 0, pszURL, -1, bstrURL, nChars );
 
 	VARIANT url, empty;
@@ -585,16 +592,11 @@ void CIEBrowserHost::Navigate( const char *pszURL )
 	// links the player clicks to other sites open in the system browser (see Invoke)
 	GetURLHost( bstrURL, m_szPageHost, ARRAYSIZE( m_szPageHost ) );
 
-	// a local file is shown without scripts; the control reads DLCONTROL again
-	// when told that it changed
-	m_bLocalPage = !_wcsnicmp( bstrURL, L"file:", 5 );
-	m_bExpectLocalNav = m_bLocalPage;
-	IOleControl *pControl = NULL;
-	if ( SUCCEEDED( m_pBrowser->QueryInterface( IID_IOleControl, (void **)&pControl ) ) && pControl )
-	{
-		pControl->OnAmbientPropertyChange( DISPID_AMBIENT_DLCONTROL );
-		pControl->Release();
-	}
+	// a new page replaces HTML text that hasn't been written yet; set before the
+	// navigation starts, in case about:blank completes right away
+	if ( m_bstrPendingHTML )
+		SysFreeString( m_bstrPendingHTML );
+	m_bstrPendingHTML = bstrHTML;
 
 	m_pBrowser->Navigate2( &url, &empty, &empty, &empty, &empty );
 	VariantClear( &url );
@@ -801,6 +803,55 @@ void CIEBrowserHost::DisableDragging()
 	pDocDisp->Release();
 }
 
+// HTML text the server sends as MOTD (instead of a URL) is written into about:blank:
+// the page then has the rights of an Internet page. Opened from a file:// copy on
+// disk it would run in the Local Machine zone, where scripts can read local files.
+void CIEBrowserHost::NavigateHTML( BSTR bstrHTML )
+{
+	if ( !m_pBrowser || !bstrHTML )
+	{
+		SysFreeString( bstrHTML );
+		return;
+	}
+
+	// written once about:blank has loaded (DISPID_DOCUMENTCOMPLETE); drops older pending HTML
+	Navigate( "about:blank", bstrHTML );
+}
+
+void CIEBrowserHost::WritePendingHTML()
+{
+	BSTR bstrHTML = m_bstrPendingHTML;
+	m_bstrPendingHTML = NULL;
+	if ( !bstrHTML )
+		return;
+
+	IDispatch *pDocDisp = NULL;
+	IHTMLDocument2 *pDoc = NULL;
+	if ( m_pBrowser && SUCCEEDED( m_pBrowser->get_Document( &pDocDisp ) ) && pDocDisp &&
+		SUCCEEDED( pDocDisp->QueryInterface( IID_IHTMLDocument2, (void **)&pDoc ) ) && pDoc )
+	{
+		SAFEARRAY *psa = SafeArrayCreateVector( VT_VARIANT, 0, 1 );
+		VARIANT *pVar = NULL;
+		if ( psa && SUCCEEDED( SafeArrayAccessData( psa, (void **)&pVar ) ) )
+		{
+			pVar->vt = VT_BSTR;
+			pVar->bstrVal = bstrHTML;	// owned by the array from here on
+			bstrHTML = NULL;
+			SafeArrayUnaccessData( psa );
+
+			pDoc->write( psa );
+			pDoc->close();
+		}
+		if ( psa )
+			SafeArrayDestroy( psa );	// frees the BSTR
+	}
+	if ( pDoc )
+		pDoc->Release();
+	if ( pDocDisp )
+		pDocDisp->Release();
+	SysFreeString( bstrHTML );
+}
+
 //-----------------------------------------------------------------------------
 // CIEBrowser
 //-----------------------------------------------------------------------------
@@ -845,6 +896,47 @@ void CIEBrowser::Navigate( const char *pszURL )
 		m_pHost->Navigate( pszURL );
 }
 
+// MOTD text has no fixed encoding: UTF-8 if it is valid UTF-8, otherwise the code page
+// its meta tag names (windows-1251 on many Russian servers) or the system code page
+static BSTR HTMLTextToBSTR( const char *pszHTML )
+{
+	if ( !strncmp( pszHTML, "\xEF\xBB\xBF", 3 ) )
+		pszHTML += 3;
+
+	int nLen = (int)strlen( pszHTML );
+	if ( nLen <= 0 )
+		return NULL;
+
+	UINT nCodePage = CP_UTF8;
+	DWORD dwFlags = MB_ERR_INVALID_CHARS;
+	int nChars = MultiByteToWideChar( nCodePage, dwFlags, pszHTML, nLen, NULL, 0 );
+	if ( nChars <= 0 )
+	{
+		char szHead[1024];
+		int nHead = nLen < (int)sizeof( szHead ) - 1 ? nLen : (int)sizeof( szHead ) - 1;
+		for ( int i = 0; i < nHead; i++ )
+			szHead[i] = (char)tolower( (unsigned char)pszHTML[i] );
+		szHead[nHead] = 0;
+
+		nCodePage = ( strstr( szHead, "1251" ) || strstr( szHead, "cyrillic" ) ) ? 1251 : CP_ACP;
+		dwFlags = 0;
+		nChars = MultiByteToWideChar( nCodePage, dwFlags, pszHTML, nLen, NULL, 0 );
+		if ( nChars <= 0 )
+			return NULL;
+	}
+
+	BSTR bstr = SysAllocStringLen( NULL, nChars );
+	if ( bstr )
+		MultiByteToWideChar( nCodePage, dwFlags, pszHTML, nLen, bstr, nChars );
+	return bstr;
+}
+
+void CIEBrowser::NavigateHTML( const char *pszHTML )
+{
+	if ( m_pHost && pszHTML )
+		m_pHost->NavigateHTML( HTMLTextToBSTR( pszHTML ) );
+}
+
 void CIEBrowser::SetSize( int nWide, int nTall )
 {
 	if ( m_pHost )
@@ -882,6 +974,7 @@ CIEBrowser::~CIEBrowser() {}
 bool CIEBrowser::Init( int, int ) { return false; }
 void CIEBrowser::Shutdown() {}
 void CIEBrowser::Navigate( const char * ) {}
+void CIEBrowser::NavigateHTML( const char * ) {}
 void CIEBrowser::SetSize( int, int ) {}
 bool CIEBrowser::Render( unsigned char *, int, int ) { return false; }
 void CIEBrowser::MouseMove( int, int ) {}

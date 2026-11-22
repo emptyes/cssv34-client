@@ -17,6 +17,7 @@
 
 #include <game/client/iviewport.h>
 #include "shareddefs.h"
+#include "tier1/utlstring.h"
 
 namespace vgui
 {
@@ -61,6 +62,7 @@ public:
 
 	// HTML MOTD without the Steam HTML surface (Windows WebBrowser control)
 	bool ShowURLWithBrowser( const char *URL );
+	bool ShowHTMLWithBrowser( const char *pszHTML );
 	void ShowFallbackText();
 
 	virtual void ApplySchemeSettings( vgui::IScheme *pScheme );
@@ -96,6 +98,7 @@ protected:
 	CMOTDHTML		*m_pHTMLMessage;
 	CIEHTMLPanel	*m_pBrowserMessage;		// used instead of m_pHTMLMessage when Steam can't render HTML
 	char			m_szBrowserURL[2048];	// page shown in m_pBrowserMessage, reopened when the panel is shown again
+	CUtlString		m_BrowserHTML;			// or the HTML text shown there
 	
 	vgui::Button	*m_pOK;
 	vgui::Label		*m_pTitleLabel;
