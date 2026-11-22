@@ -108,8 +108,16 @@ void CPluginMenu::Show( KeyValues *kv )
 //-----------------------------------------------------------------------------
 void CPluginMenu::OnCommand( const char *command )
 {
-	Cbuf_AddText( command );
-	Cbuf_AddText( "\n" );
+	// The command of a menu item comes from the server. Run it like the entry dialog does
+	// (CPluginGameUIDialog::OnCommand): only commands marked FCVAR_CLIENTCMD_CAN_EXECUTE run
+	// on the client, others (plugin commands like sm_..., say) are forwarded to the server.
+	// Otherwise a menu item could run any client command (bind, connect, exec ...).
+	if ( Cbuf_HasRoomForExecutionMarkers( 2 ) )
+	{
+		char userCMD[ 512 ];
+		Q_snprintf( userCMD, sizeof( userCMD ), "%s\n", command );
+		Cbuf_AddTextWithMarkers( eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE, userCMD, eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE );
+	}
 
 	CallParentFunction( new KeyValues( "Command", "command", "close" ) );
 }
