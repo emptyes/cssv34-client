@@ -205,6 +205,8 @@ private:
 	bool				m_bButtonDown;
 	DWORD				m_dwLastClickTick;	// GetTickCount() of the last click on the page
 	wchar_t				m_szPageHost[256];	// host of the page the game opened
+	bool				m_bLocalPage;		// the game opened a local file (HTML MOTD text of the server)
+	bool				m_bExpectLocalNav;	// that navigation hasn't started yet
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -229,6 +231,8 @@ CIEBrowserHost::CIEBrowserHost()
 	m_bButtonDown = false;
 	m_dwLastClickTick = 0;
 	m_szPageHost[0] = 0;
+	m_bLocalPage = false;
+	m_bExpectLocalNav = false;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -325,6 +329,15 @@ static void GetURLHost( const wchar_t *pszURL, wchar_t *pszHost, int nHostChars 
 	pszHost[n] = 0;
 }
 
+// schemes a page in the MOTD panel may navigate to
+static bool IsAllowedPanelURL( const wchar_t *pszURL )
+{
+	return !_wcsnicmp( pszURL, L"http://", 7 ) ||
+		!_wcsnicmp( pszURL, L"https://", 8 ) ||
+		!_wcsnicmp( pszURL, L"about:", 6 ) ||
+		!_wcsnicmp( pszURL, L"javascript:", 11 );
+}
+
 STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *, UINT * )
 {
 	switch ( dispIdMember )
@@ -336,6 +349,10 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 			VariantInit( pVarResult );
 			pVarResult->vt = VT_I4;
 			pVarResult->lVal = DLCTL_DLIMAGES | DLCTL_SILENT | DLCTL_NO_DLACTIVEXCTLS | DLCTL_NO_RUNACTIVEXCTLS;
+			// a local file runs in the Local Machine zone, where scripts may read local
+			// files: the HTML text a server sends as MOTD is shown without scripts
+			if ( m_bLocalPage )
+				pVarResult->lVal |= DLCTL_NO_SCRIPTS | DLCTL_NO_JAVA;
 		}
 		return S_OK;
 
@@ -344,22 +361,22 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 		return S_OK;
 
 	case DISPID_BEFORENAVIGATE2:
-		// A link the player clicked that leads to another site opens in the system browser:
-		// the in-game IE11 engine can't show most modern sites (a blank page). Navigation
-		// within the server's site, and navigation by the page itself, stay in the panel.
 		// args (reversed): pDisp, URL, Flags, TargetFrameName, PostData, Headers, Cancel
-		if ( pDispParams && pDispParams->cArgs >= 7 && GetTickCount() - m_dwLastClickTick < 1000 )
+		if ( pDispParams && pDispParams->cArgs >= 7 )
 		{
 			VARIANT &frame = pDispParams->rgvarg[6];
 			VARIANT &url = pDispParams->rgvarg[5];
 			VARIANT &cancel = pDispParams->rgvarg[0];
+			if ( cancel.vt != ( VT_BYREF | VT_BOOL ) || !cancel.pboolVal )
+				return S_OK;
+
 			const wchar_t *pszURL = NULL;
 			if ( url.vt == ( VT_BYREF | VT_VARIANT ) && url.pvarVal && url.pvarVal->vt == VT_BSTR )
 				pszURL = url.pvarVal->bstrVal;
 			else if ( url.vt == VT_BSTR )
 				pszURL = url.bstrVal;
 
-			// only the top level page, not frames inside it
+			// the top level page, not frames inside it
 			bool bTopLevel = false;
 			if ( frame.vt == VT_DISPATCH && frame.pdispVal && m_pBrowser )
 			{
@@ -371,9 +388,32 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 				if ( pTop ) pTop->Release();
 			}
 
-			wchar_t szHost[256];
-			if ( pszURL && bTopLevel && cancel.vt == ( VT_BYREF | VT_BOOL ) && cancel.pboolVal )
+			// The page comes from the server: it may only lead to web pages. Other schemes
+			// (file:, res:, protocols of installed programs such as ms-msdt: or search-ms:)
+			// are cancelled, in frames too, so a page can't open local files or programs.
+			// The only local file is the one the game itself opens (see Navigate).
+			if ( !pszURL )
 			{
+				*cancel.pboolVal = VARIANT_TRUE;
+				return S_OK;
+			}
+			if ( !IsAllowedPanelURL( pszURL ) )
+			{
+				if ( bTopLevel && m_bExpectLocalNav && !_wcsnicmp( pszURL, L"file:", 5 ) )
+				{
+					m_bExpectLocalNav = false;
+					return S_OK;
+				}
+				*cancel.pboolVal = VARIANT_TRUE;
+				return S_OK;
+			}
+
+			// A link the player clicked that leads to another site opens in the system browser:
+			// the in-game IE11 engine can't show most modern sites (a blank page). Navigation
+			// within the server's site, and navigation by the page itself, stay in the panel.
+			if ( bTopLevel && GetTickCount() - m_dwLastClickTick < 1000 )
+			{
+				wchar_t szHost[256];
 				GetURLHost( pszURL, szHost, ARRAYSIZE( szHost ) );
 				if ( szHost[0] && _wcsicmp( szHost, m_szPageHost ) )
 				{
@@ -544,6 +584,17 @@ void CIEBrowserHost::Navigate( const char *pszURL )
 
 	// links the player clicks to other sites open in the system browser (see Invoke)
 	GetURLHost( bstrURL, m_szPageHost, ARRAYSIZE( m_szPageHost ) );
+
+	// a local file is shown without scripts; the control reads DLCONTROL again
+	// when told that it changed
+	m_bLocalPage = !_wcsnicmp( bstrURL, L"file:", 5 );
+	m_bExpectLocalNav = m_bLocalPage;
+	IOleControl *pControl = NULL;
+	if ( SUCCEEDED( m_pBrowser->QueryInterface( IID_IOleControl, (void **)&pControl ) ) && pControl )
+	{
+		pControl->OnAmbientPropertyChange( DISPID_AMBIENT_DLCONTROL );
+		pControl->Release();
+	}
 
 	m_pBrowser->Navigate2( &url, &empty, &empty, &empty, &empty );
 	VariantClear( &url );
