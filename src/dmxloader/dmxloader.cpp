@@ -296,7 +296,8 @@ CDmxElement* CDmxSerializer::UnserializeElementIndex( CUtlBuffer &buf, CUtlVecto
 
 	Assert( nElementIndex < elementList.Count() );
 	Assert( nElementIndex >= 0 || nElementIndex == ELEMENT_INDEX_NULL );
-	if ( nElementIndex < 0 || !elementList[ nElementIndex ] )
+	// the index comes from the file (particle files are downloaded with maps)
+	if ( nElementIndex < 0 || nElementIndex >= elementList.Count() || !elementList[ nElementIndex ] )
 		return NULL;
 
 	return elementList[ nElementIndex ];
@@ -319,6 +320,12 @@ void CDmxSerializer::UnserializeElementAttribute( CUtlBuffer &buf, CDmxAttribute
 void CDmxSerializer::UnserializeElementArrayAttribute( CUtlBuffer &buf, CDmxAttribute *pAttribute, CUtlVector<CDmxElement*> &elementList )
 {
 	int nElementCount = buf.GetInt();
+	// every element index takes 4 bytes
+	if ( nElementCount < 0 || nElementCount > buf.GetBytesRemaining() / 4 )
+	{
+		buf.SeekGet( CUtlBuffer::SEEK_TAIL, 0 );
+		return;
+	}
 	CUtlVector< CDmxElement* >& elementArray = pAttribute->GetArrayForEdit< CDmxElement* >();
 	elementArray.EnsureCapacity( nElementCount );
 
@@ -339,13 +346,15 @@ bool CDmxSerializer::UnserializeAttributes( CUtlBuffer &buf, CDmxElement *pEleme
 
 	char nameBuf[ 1024 ];
 	int nAttributeCount = buf.GetInt();
-	for ( int i = 0; i < nAttributeCount; ++i )
+	if ( nAttributeCount < 0 || nAttributeCount > buf.GetBytesRemaining() )
+		return false;
+	for ( int i = 0; i < nAttributeCount && buf.IsValid(); ++i )
 	{
 		const char *pName = NULL;
 		if ( stringTable )
 		{
 			int si = buf.GetShort();
-			if ( si >= nStrings )
+			if ( si < 0 || si >= nStrings )
 				return false;
 			pName = stringTable + offsetTable[ si ];
 		}
@@ -450,7 +459,7 @@ bool CDmxSerializer::Unserialize( CUtlBuffer &buf, int nEncodingVersion, CDmxEle
 		return true;
 	}
 
-	if ( nElementCount < 0 || ( bReadStringTable && !stringTable ) )
+	if ( nElementCount < 0 || nElementCount > buf.GetBytesRemaining() || ( bReadStringTable && !stringTable ) )
 	{
 		// Invalid file. Non-empty files with a string table need at least one to associate with elements.
 		return false;
@@ -468,7 +477,7 @@ bool CDmxSerializer::Unserialize( CUtlBuffer &buf, int nEncodingVersion, CDmxEle
 		if ( stringTable )
 		{
 			int si = buf.GetShort();
-			if ( si >= nStrings )
+			if ( si < 0 || si >= nStrings )
 				return false;
 			pType = stringTable + offsetTable[ si ];
 		}

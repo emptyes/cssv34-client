@@ -497,6 +497,9 @@ bool Unserialize( CUtlBuffer &buf, CUtlBinaryBlock &dest )
 	if ( !buf.IsText() )
 	{
 		int nLen = buf.GetInt( );
+		// the length comes from the data
+		if ( nLen < 0 || nLen > buf.GetBytesRemaining() )
+			return false;
 		dest.SetLength( nLen );
 		if ( dest.Length() != 0 )
 		{

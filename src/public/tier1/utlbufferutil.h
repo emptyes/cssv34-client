@@ -161,6 +161,9 @@ bool Unserialize( CUtlBuffer &buf, CUtlVector<T> &dest )
 	if ( !buf.IsText() )
 	{
 		int nCount = buf.GetInt();
+		// the count comes from the data: every element takes at least one byte
+		if ( nCount < 0 || nCount > buf.GetBytesRemaining() )
+			return false;
 		if ( nCount )
 		{
 			dest.EnsureCapacity( nCount );
