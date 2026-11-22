@@ -401,11 +401,11 @@ bool CStudioHdrValidator::ValidateSequences()
 		}
 
 		// the blend grid: groupsize[0] x groupsize[1] animation numbers
-		// (no upper limit: gesture and pose libraries use large grids, e.g. models/vortigaunt_gestures.mdl;
-		// the grid must fit in the file, and 0 would make the clamped index -1)
-		if ( pSeq->groupsize[0] < 1 || pSeq->groupsize[1] < 1 )
+		// The grid can have size 0 on an axis (standard models such as models/monk_animations.mdl
+		// and models/vortigaunt_gestures.mdl); mstudioseqdesc_t::anim() then reads the first entry.
+		if ( pSeq->groupsize[0] < 0 || pSeq->groupsize[1] < 0 )
 			return Fail( "sequence blend grid size", i );
-		if ( !Range( pSeq, pSeq->animindexindex, (int64)pSeq->groupsize[0] * pSeq->groupsize[1], sizeof( short ) ) )
+		if ( !Range( pSeq, pSeq->animindexindex, MAX( (int64)pSeq->groupsize[0] * pSeq->groupsize[1], (int64)1 ), sizeof( short ) ) )
 			return Fail( "sequence blend grid range", i );
 		// the animation numbers aren't checked: pLocalAnimdesc() uses animation 0 for numbers
 		// out of range (some server models reference missing animations)

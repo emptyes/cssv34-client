@@ -841,6 +841,13 @@ struct mstudioseqdesc_t
 			y = groupsize[ 1 ] - 1;
 		}
 
+		// some models have a grid size of 0 (e.g. models/vortigaunt_gestures.mdl): use the
+		// first entry instead of the one before the grid
+		if ( x < 0 )
+			x = 0;
+		if ( y < 0 )
+			y = 0;
+
 		int offset = y * groupsize[0] + x;
 		short *blends = (short *)(((byte *)this) + animindexindex);
 		int value = (int)blends[ offset ];
