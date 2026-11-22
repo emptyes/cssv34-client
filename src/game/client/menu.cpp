@@ -427,6 +427,11 @@ void CHudMenu::ShowMenu_KeyValueItems( KeyValues *pKV )
 		const wchar_t *wLocalizedItem = g_pVGuiLocalize->Find( pszItem );
 
 		nCount = _snwprintf( pWritePosition, nRemaining, L"%d. %ls\n", i+1, wLocalizedItem );
+		if ( nCount < 0 || nCount >= nRemaining )
+		{
+			nCount = nRemaining - 1;	// truncated: _snwprintf may leave no terminator
+			pWritePosition[ nCount ] = 0;
+		}
 		nRemaining -= nCount;
 		pWritePosition += nCount;
 
@@ -437,6 +442,11 @@ void CHudMenu::ShowMenu_KeyValueItems( KeyValues *pKV )
 	m_bitsValidSlots |= (1<<9);
 
 	nCount = _snwprintf( pWritePosition, nRemaining, L"0. %ls\n", g_pVGuiLocalize->Find( "#Cancel" ) );
+	if ( nCount < 0 || nCount >= nRemaining )
+	{
+		nCount = nRemaining - 1;
+		pWritePosition[ nCount ] = 0;
+	}
 	nRemaining -= nCount;
 	pWritePosition += nCount;
 

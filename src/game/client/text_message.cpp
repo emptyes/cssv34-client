@@ -47,57 +47,75 @@ IHudTextMessage *hudtextmessage = &g_HudTextMessage;
 //-----------------------------------------------------------------------------
 char *CHudTextMessage::LocaliseTextString( const char *msg, char *dst_buffer, int buffer_size )
 {
+	// msg comes from the server (ShowMenu): every write below is bounded by
+	// dst_buffer, a message name longer than word_buf is not looked up
+	if ( !dst_buffer || buffer_size <= 0 )
+		return dst_buffer;
+
+	dst_buffer[0] = 0;
+	if ( !msg )
+		return dst_buffer;
+
 	char *dst = dst_buffer;
-	for ( char *src = (char*)msg; *src != 0 && buffer_size > 0; buffer_size-- )
+	char *dst_end = dst_buffer + buffer_size - 1;	// room for the terminator
+
+	const char *src = msg;
+	while ( *src != 0 && dst < dst_end )
 	{
 		if ( *src == '#' )
 		{
 			// cut msg name out of string
-			static char word_buf[255];
-			char *wdst = word_buf, *word_start = src;
-			for ( ++src ; *src >= 'A' && *src <= 'z'; wdst++, src++ )
+			char word_buf[255];
+			int word_len = 0;
+			const char *word_end = src + 1;
+			while ( *word_end >= 'A' && *word_end <= 'z' )
 			{
-				*wdst = *src;
+				if ( word_len < (int)sizeof( word_buf ) - 1 )
+					word_buf[ word_len ] = *word_end;
+				word_len++;
+				word_end++;
 			}
-			*wdst = 0;
 
 			// lookup msg name in titles.txt
-			client_textmessage_t *clmsg = TextMessageGet( word_buf );
-			if ( !clmsg || !(clmsg->pMessage) )
+			client_textmessage_t *clmsg = NULL;
+			if ( word_len > 0 && word_len < (int)sizeof( word_buf ) )
 			{
-				src = word_start;
-				*dst = *src;
-				dst++, src++;
+				word_buf[ word_len ] = 0;
+				clmsg = TextMessageGet( word_buf );
+			}
+
+			if ( !clmsg || !clmsg->pMessage )
+			{
+				// not a message name: copy the '#' as is
+				*dst++ = *src++;
 				continue;
 			}
 
 			// Does titles.txt want to lookup into cstrike_<language>.txt?
 			wchar_t *pLocalizedStr;
-			if ( clmsg->pMessage[0] == '#' && ((pLocalizedStr = g_pVGuiLocalize->Find( clmsg->pMessage )) != NULL ) )
+			if ( clmsg->pMessage[0] == '#' && ( ( pLocalizedStr = g_pVGuiLocalize->Find( clmsg->pMessage ) ) != NULL ) )
 			{
-				g_pVGuiLocalize->ConvertUnicodeToANSI( pLocalizedStr, dst, buffer_size );
+				g_pVGuiLocalize->ConvertUnicodeToANSI( pLocalizedStr, dst, dst_end - dst + 1 );
+				dst += V_strlen( dst );
 			}
 			else
 			{
 				// copy string into message over the msg name
-				for ( char *wsrc = (char*)clmsg->pMessage; *wsrc != 0; wsrc++, dst++ )
+				for ( const char *wsrc = clmsg->pMessage; *wsrc != 0 && dst < dst_end; wsrc++ )
 				{
-					*dst = *wsrc;
+					*dst++ = *wsrc;
 				}
-				*dst = 0;
 			}
+
+			src = word_end;
 		}
 		else
 		{
-			*dst = *src;
-			dst++, src++;
-			*dst = 0;
+			*dst++ = *src++;
 		}
 	}
 
-	//
-// ensure null termination
-	dst_buffer[buffer_size-1] = 0; 
+	*dst = 0;
 	return dst_buffer;
 }
 
