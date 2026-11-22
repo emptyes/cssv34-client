@@ -196,7 +196,9 @@ bool CStudioHdrValidator::ValidateHitboxes()
 		for ( int j = 0; j < pSet->numhitboxes; j++ )
 		{
 			const mstudiobbox_t *pBox = pSet->pHitbox( j );
-			if ( (unsigned)pBox->bone >= (unsigned)h->numbones || !OptString( pBox, pBox->szhitboxnameindex ) )
+			// szhitboxnameindex is not checked: older studiomdl versions wrote it relative to the
+			// header, and the client doesn't read the name
+			if ( (unsigned)pBox->bone >= (unsigned)h->numbones )
 				return Fail( "hitbox", j );
 		}
 	}
@@ -210,8 +212,13 @@ bool CStudioHdrValidator::ValidateAnimData( const mstudioanimdesc_t *pDesc, cons
 	const mstudioanim_t *pAnim = (const mstudioanim_t *)pData;
 	for ( int nNodes = 0; pAnim; nNodes++ )
 	{
-		if ( nNodes > MAXSTUDIOBONES || !Range( pAnim, 0, 1, sizeof( mstudioanim_t ) ) ||
-			pAnim->bone >= m_pHdr->numbones )
+		if ( nNodes > MAXSTUDIOBONES || !Range( pAnim, 0, 1, sizeof( mstudioanim_t ) ) )
+			return false;
+		// bone 255 ends the list (an animation without animated bones); the bone setup
+		// loop stops there too
+		if ( pAnim->bone == 255 )
+			break;
+		if ( pAnim->bone >= m_pHdr->numbones )
 			return false;
 
 		// the per bone data follows the header: value pointers or raw values
@@ -347,14 +354,8 @@ bool CStudioHdrValidator::ValidateSequences()
 		if ( pSeq->groupsize[0] < 1 || pSeq->groupsize[1] < 1 || pSeq->groupsize[0] > 64 || pSeq->groupsize[1] > 64 ||
 			!Range( pSeq, pSeq->animindexindex, pSeq->groupsize[0] * pSeq->groupsize[1], sizeof( short ) ) )
 			return Fail( "sequence blends", i );
-		const short *pAnims = (const short *)( (const byte *)pSeq + pSeq->animindexindex );
-		for ( int a = 0; a < pSeq->groupsize[0] * pSeq->groupsize[1]; a++ )
-		{
-			// relative to the including model for sequences of included models: checked
-			// against this model only when there are none
-			if ( pAnims[a] < 0 || ( h->numincludemodels == 0 && pAnims[a] >= h->numlocalanim ) )
-				return Fail( "sequence animation", i );
-		}
+		// the animation numbers aren't checked: pLocalAnimdesc() uses animation 0 for numbers
+		// out of range (some server models reference missing animations)
 		for ( int p = 0; p < 2; p++ )
 		{
 			if ( pSeq->paramindex[p] < -1 || pSeq->paramindex[p] >= h->numlocalposeparameters )
@@ -370,8 +371,8 @@ bool CStudioHdrValidator::ValidateSequences()
 		for ( int l = 0; l < pSeq->numautolayers; l++ )
 		{
 			const mstudioautolayer_t *pLayer = pSeq->pAutolayer( l );
-			if ( pLayer->iSequence < 0 || ( h->numincludemodels == 0 && pLayer->iSequence >= h->numlocalseq ) ||
-				pLayer->iPose < -1 || pLayer->iPose >= h->numlocalposeparameters )
+			// iSequence: pLocalSeqdesc() uses sequence 0 for numbers out of range
+			if ( pLayer->iPose < -1 || pLayer->iPose >= h->numlocalposeparameters )
 				return Fail( "sequence layer", i );
 		}
 
