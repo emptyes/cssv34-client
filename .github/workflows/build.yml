@@ -125,12 +125,34 @@ jobs:
         if-no-files-found: error
         retention-days: 14
 
+    # The release description lists the commit subjects since the previous release. Without a
+    # description GitHub shows the full message of the tagged commit, including its trailers.
+    - name: Release notes
+      if: github.ref == 'refs/heads/master'
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # commit subjects are in Russian: read git's output as UTF-8
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        git config i18n.logOutputEncoding utf-8
+        git fetch --quiet --unshallow origin
+        $prev = gh release view --repo ${{ github.repository }} --json targetCommitish --jq .targetCommitish
+        if ($LASTEXITCODE -ne 0 -or -not $prev) { $range = @('-20') } else { $range = @("$prev..HEAD") }
+        $subjects = git log --no-merges --format='- %s' @range
+        if ($LASTEXITCODE -ne 0 -or -not $subjects) { $subjects = git log -1 --format='- %s' }
+        $notes = @('Изменения:', '') + $subjects
+        Set-Content -Path release_notes.md -Value $notes -Encoding utf8
+        Get-Content release_notes.md
+        $global:LASTEXITCODE = 0
+
     - name: Publish release
       if: github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: build-${{ github.run_number }}
         name: Build ${{ github.run_number }}
+        body_path: release_notes.md
         target_commitish: ${{ github.sha }}
         fail_on_unmatched_files: true
         files: |
