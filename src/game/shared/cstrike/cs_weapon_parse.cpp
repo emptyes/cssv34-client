@@ -141,7 +141,7 @@ void PrepareEquipmentInfo( void )
 //--------------------------------------------------------------------------------------------------------------
 CCSWeaponInfo * GetWeaponInfo( CSWeaponID weaponID )
 {
-	if ( weaponID == WEAPON_NONE )
+	if ( weaponID <= WEAPON_NONE || weaponID >= WEAPON_MAX )
 		return NULL;
 
 	if ( weaponID >= WEAPON_KEVLAR )

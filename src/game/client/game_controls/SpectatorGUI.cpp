@@ -384,7 +384,9 @@ void CSpectatorMenu::Update( void )
 	//=============================================================================
 	
 	int specmode = GetSpectatorMode();
-	m_pViewOptions->SetText(s_SpectatorModes[specmode]);
+	// the mode comes from the server (m_iObserverMode)
+	if ( specmode >= 0 && specmode < (int)ARRAYSIZE( s_SpectatorModes ) )
+		m_pViewOptions->SetText(s_SpectatorModes[specmode]);
 	
 	//=============================================================================
 	// HPE_END
