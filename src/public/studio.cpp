@@ -383,7 +383,8 @@ int studiohdr_t::GetSharedPoseParameter( int iSequence, int iLocalPose ) const
 
 	virtualgroup_t *pGroup = &pVModel->m_group[ pVModel->m_seq[iSequence].group ];
 
-	return pGroup->masterPose[iLocalPose];
+	// the local number comes from the model file
+	return pGroup->masterPose.IsValidIndex( iLocalPose ) ? pGroup->masterPose[iLocalPose] : -1;
 }
 
 
@@ -1039,7 +1040,10 @@ int CStudioHdr::GetSharedPoseParameter( int iSequence, int iLocalPose ) const
 	int group = m_pVModel->m_seq[iSequence].group;
 	virtualgroup_t *pGroup = m_pVModel->m_group.IsValidIndex( group ) ? &m_pVModel->m_group[ group ] : NULL;
 
-	return pGroup ? pGroup->masterPose[iLocalPose] : iLocalPose;
+	if ( !pGroup )
+		return iLocalPose;
+	// the local number comes from the model file
+	return pGroup->masterPose.IsValidIndex( iLocalPose ) ? pGroup->masterPose[iLocalPose] : -1;
 }
 
 

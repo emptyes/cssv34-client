@@ -4051,3 +4051,108 @@ const studiohdr_t *virtualgroup_t::GetStudioHdr( void ) const
 	return g_MDLCache.GetStudioHdr( VoidPtrToMDLHandle( cache ) );
 }
 
+
+
+//-----------------------------------------------------------------------------
+// mdl_check_all: runs the model file checks on every model the game can see
+// (loose files and VPKs), so models the validation would reject can be found
+// without playing every map. Reports only the problems.
+//-----------------------------------------------------------------------------
+static bool ReadModelFile( const char *pszFile, CUtlBuffer &buf )
+{
+	buf.Purge();
+	return g_pFullFileSystem->ReadFile( pszFile, "GAME", buf ) && buf.TellMaxPut() > 0;
+}
+
+static bool CheckModelFile( const char *pszFile )
+{
+	CUtlBuffer mdl;
+	if ( !ReadModelFile( pszFile, mdl ) || mdl.TellMaxPut() < (int)sizeof( studiohdr_t ) )
+	{
+		Msg( "%s: cannot read\n", pszFile );
+		return false;
+	}
+	const studiohdr_t *pHdr = (const studiohdr_t *)mdl.Base();
+	if ( pHdr->id != IDSTUDIOHEADER )
+		return true;	// not a model: nothing the loader would use
+
+	CStudioHdrValidator validator( pHdr, mdl.TellMaxPut() );
+	if ( !validator.Validate() )
+	{
+		Msg( "%s: .mdl: bad %s (%d)\n", pszFile, validator.Error(), validator.ErrorIndex() );
+		return false;
+	}
+	if ( !pHdr->numbodyparts )
+		return true;
+
+	char szBase[MAX_PATH];
+	V_StripExtension( pszFile, szBase, sizeof( szBase ) );
+	char szFile[MAX_PATH];
+
+	CUtlBuffer vvd;
+	V_snprintf( szFile, sizeof( szFile ), "%s.vvd", szBase );
+	if ( ReadModelFile( szFile, vvd ) && vvd.TellMaxPut() >= (int)sizeof( vertexFileHeader_t ) )
+	{
+		const vertexFileHeader_t *pVvd = (const vertexFileHeader_t *)vvd.Base();
+		const char *pszError = "header";
+		if ( pVvd->id == MODEL_VERTEX_FILE_ID && pVvd->version == MODEL_VERTEX_FILE_VERSION && pVvd->checksum == pHdr->checksum &&
+			( !ValidateVertexData( pVvd, vvd.TellMaxPut(), 0, true ) || !ValidateVertexBones( pHdr, pVvd, 0, &pszError ) ) )
+		{
+			Msg( "%s: .vvd: bad %s\n", pszFile, pszError );
+			return false;
+		}
+	}
+
+	CUtlBuffer vtx;
+	V_snprintf( szFile, sizeof( szFile ), "%s.dx90.vtx", szBase );
+	if ( ReadModelFile( szFile, vtx ) && vtx.TellMaxPut() >= (int)sizeof( OptimizedModel::FileHeader_t ) )
+	{
+		const OptimizedModel::FileHeader_t *pVtx = (const OptimizedModel::FileHeader_t *)vtx.Base();
+		const char *pszError = NULL;
+		if ( pVtx->version == OPTIMIZED_MODEL_FILE_VERSION && pVtx->checkSum == pHdr->checksum &&
+			!ValidateHardwareData( pHdr, pVtx, vtx.TellMaxPut(), &pszError ) )
+		{
+			Msg( "%s: .dx90.vtx: bad %s\n", pszFile, pszError );
+			return false;
+		}
+	}
+	return true;
+}
+
+static void CheckModelsInDirectory( const char *pszDir, int &nChecked, int &nBad )
+{
+	char szWildcard[MAX_PATH];
+	V_snprintf( szWildcard, sizeof( szWildcard ), "%s/*", pszDir );
+
+	CUtlVector<CUtlString> subDirs;
+	FileFindHandle_t hFind;
+	for ( const char *pszName = g_pFullFileSystem->FindFirstEx( szWildcard, "GAME", &hFind ); pszName; pszName = g_pFullFileSystem->FindNext( hFind ) )
+	{
+		if ( !V_strcmp( pszName, "." ) || !V_strcmp( pszName, ".." ) )
+			continue;
+
+		char szPath[MAX_PATH];
+		V_snprintf( szPath, sizeof( szPath ), "%s/%s", pszDir, pszName );
+		if ( g_pFullFileSystem->FindIsDirectory( hFind ) )
+		{
+			subDirs.AddToTail( szPath );
+		}
+		else if ( !V_stricmp( V_GetFileExtension( pszName ) ? V_GetFileExtension( pszName ) : "", "mdl" ) )
+		{
+			nChecked++;
+			if ( !CheckModelFile( szPath ) )
+				nBad++;
+		}
+	}
+	g_pFullFileSystem->FindClose( hFind );
+
+	for ( int i = 0; i < subDirs.Count(); i++ )
+		CheckModelsInDirectory( subDirs[i].Get(), nChecked, nBad );
+}
+
+CON_COMMAND( mdl_check_all, "Checks all models (loose files and VPKs) with the model load validation and lists the ones that would not load" )
+{
+	int nChecked = 0, nBad = 0;
+	CheckModelsInDirectory( "models", nChecked, nBad );
+	Msg( "mdl_check_all: %d models checked, %d with problems\n", nChecked, nBad );
+}

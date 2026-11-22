@@ -406,25 +406,17 @@ bool CStudioHdrValidator::ValidateSequences()
 			return Fail( "sequence blends", i );
 		// the animation numbers aren't checked: pLocalAnimdesc() uses animation 0 for numbers
 		// out of range (some server models reference missing animations)
-		for ( int p = 0; p < 2; p++ )
-		{
-			if ( pSeq->paramindex[p] < -1 || pSeq->paramindex[p] >= h->numlocalposeparameters )
-				return Fail( "sequence pose parameter", i );
-		}
+		// paramindex and the layers' iPose are not checked against this model: in animation
+		// libraries ($includemodel, e.g. models/humans/female_ss.mdl) they refer to the pose
+		// parameters of the including model; GetSharedPoseParameter checks the mapping
 		if ( pSeq->posekeyindex && !Range( pSeq, pSeq->posekeyindex, pSeq->groupsize[0] + pSeq->groupsize[1], sizeof( float ) ) )
 			return Fail( "sequence pose keys", i );
 		if ( pSeq->weightlistindex && !Range( pSeq, pSeq->weightlistindex, h->numbones, sizeof( float ) ) )
 			return Fail( "sequence weights", i );
 
+		// the layers' iSequence: pLocalSeqdesc() uses sequence 0 for numbers out of range
 		if ( !Range( pSeq, pSeq->autolayerindex, pSeq->numautolayers, sizeof( mstudioautolayer_t ) ) )
 			return Fail( "sequence layers", i );
-		for ( int l = 0; l < pSeq->numautolayers; l++ )
-		{
-			const mstudioautolayer_t *pLayer = pSeq->pAutolayer( l );
-			// iSequence: pLocalSeqdesc() uses sequence 0 for numbers out of range
-			if ( pLayer->iPose < -1 || pLayer->iPose >= h->numlocalposeparameters )
-				return Fail( "sequence layer", i );
-		}
 
 		if ( !Range( pSeq, pSeq->iklockindex, pSeq->numiklocks, sizeof( mstudioiklock_t ) ) )
 			return Fail( "sequence IK locks", i );
