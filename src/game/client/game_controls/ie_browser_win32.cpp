@@ -36,6 +36,9 @@
 #pragma comment( lib, "advapi32.lib" )
 #endif
 
+#ifndef DISPID_BEFORENAVIGATE2
+#define DISPID_BEFORENAVIGATE2 250
+#endif
 #ifndef DISPID_DOCUMENTCOMPLETE
 #define DISPID_DOCUMENTCOMPLETE 259
 #endif
@@ -200,6 +203,8 @@ private:
 	HWND				m_hWnd;
 	int					m_nWide, m_nTall;
 	bool				m_bButtonDown;
+	DWORD				m_dwLastClickTick;	// GetTickCount() of the last click on the page
+	wchar_t				m_szPageHost[256];	// host of the page the game opened
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -222,6 +227,8 @@ CIEBrowserHost::CIEBrowserHost()
 	m_hWnd = NULL;
 	m_nWide = m_nTall = 0;
 	m_bButtonDown = false;
+	m_dwLastClickTick = 0;
+	m_szPageHost[0] = 0;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -298,6 +305,26 @@ STDMETHODIMP CIEBrowserHost::GetHostInfo( DOCHOSTUIINFO *pInfo )
 	return S_OK;
 }
 
+// host part of an http(s) URL ("" for other schemes)
+static void GetURLHost( const wchar_t *pszURL, wchar_t *pszHost, int nHostChars )
+{
+	pszHost[0] = 0;
+	const wchar_t *p = NULL;
+	if ( !_wcsnicmp( pszURL, L"http://", 7 ) )
+		p = pszURL + 7;
+	else if ( !_wcsnicmp( pszURL, L"https://", 8 ) )
+		p = pszURL + 8;
+	if ( !p )
+		return;
+	int n = 0;
+	while ( p[n] && p[n] != L'/' && p[n] != L':' && p[n] != L'?' && p[n] != L'#' && n < nHostChars - 1 )
+	{
+		pszHost[n] = p[n];
+		n++;
+	}
+	pszHost[n] = 0;
+}
+
 STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *, UINT * )
 {
 	switch ( dispIdMember )
@@ -314,6 +341,48 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 
 	case DISPID_DOCUMENTCOMPLETE:
 		DisableDragging();
+		return S_OK;
+
+	case DISPID_BEFORENAVIGATE2:
+		// A link the player clicked that leads to another site opens in the system browser:
+		// the in-game IE11 engine can't show most modern sites (a blank page). Navigation
+		// within the server's site, and navigation by the page itself, stay in the panel.
+		// args (reversed): pDisp, URL, Flags, TargetFrameName, PostData, Headers, Cancel
+		if ( pDispParams && pDispParams->cArgs >= 7 && GetTickCount() - m_dwLastClickTick < 1000 )
+		{
+			VARIANT &frame = pDispParams->rgvarg[6];
+			VARIANT &url = pDispParams->rgvarg[5];
+			VARIANT &cancel = pDispParams->rgvarg[0];
+			const wchar_t *pszURL = NULL;
+			if ( url.vt == ( VT_BYREF | VT_VARIANT ) && url.pvarVal && url.pvarVal->vt == VT_BSTR )
+				pszURL = url.pvarVal->bstrVal;
+			else if ( url.vt == VT_BSTR )
+				pszURL = url.bstrVal;
+
+			// only the top level page, not frames inside it
+			bool bTopLevel = false;
+			if ( frame.vt == VT_DISPATCH && frame.pdispVal && m_pBrowser )
+			{
+				IUnknown *pFrame = NULL, *pTop = NULL;
+				frame.pdispVal->QueryInterface( IID_IUnknown, (void **)&pFrame );
+				m_pBrowser->QueryInterface( IID_IUnknown, (void **)&pTop );
+				bTopLevel = pFrame && pFrame == pTop;
+				if ( pFrame ) pFrame->Release();
+				if ( pTop ) pTop->Release();
+			}
+
+			wchar_t szHost[256];
+			if ( pszURL && bTopLevel && cancel.vt == ( VT_BYREF | VT_BOOL ) && cancel.pboolVal )
+			{
+				GetURLHost( pszURL, szHost, ARRAYSIZE( szHost ) );
+				if ( szHost[0] && _wcsicmp( szHost, m_szPageHost ) )
+				{
+					*cancel.pboolVal = VARIANT_TRUE;
+					m_dwLastClickTick = 0;
+					ShellExecuteW( NULL, L"open", pszURL, NULL, NULL, SW_SHOWNORMAL );
+				}
+			}
+		}
 		return S_OK;
 
 	case DISPID_NEWWINDOW3:
@@ -473,6 +542,9 @@ void CIEBrowserHost::Navigate( const char *pszURL )
 	url.vt = VT_BSTR;
 	url.bstrVal = bstrURL;
 
+	// links the player clicks to other sites open in the system browser (see Invoke)
+	GetURLHost( bstrURL, m_szPageHost, ARRAYSIZE( m_szPageHost ) );
+
 	m_pBrowser->Navigate2( &url, &empty, &empty, &empty, &empty );
 	VariantClear( &url );
 }
@@ -604,7 +676,10 @@ void CIEBrowserHost::PostMouse( UINT msg, WPARAM wParam, int x, int y )
 	if ( msg == WM_LBUTTONDOWN )
 		m_bButtonDown = true;
 	else if ( msg == WM_LBUTTONUP )
+	{
 		m_bButtonDown = false;
+		m_dwLastClickTick = GetTickCount();
+	}
 	else if ( msg == WM_MOUSEMOVE && m_bButtonDown )
 	{
 		// released outside the panel: the panel doesn't get that release
