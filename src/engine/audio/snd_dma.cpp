@@ -249,6 +249,8 @@ float			g_ReplaySoundTimeFracAccumulator = 0.0f;	// Used by replay
 float			g_ClockSyncArray[NUM_CLOCK_SYNCS] = {0};
 int				g_SoundClockPaintTime[NUM_CLOCK_SYNCS] = {0};
 
+ConVar snd_voice_pan( "snd_voice_pan", "0", FCVAR_ARCHIVE, "Pan the voice of other players to the side they stand on (0: the same in both ears)" );
+
 // default 10ms
 ConVar snd_delay_sound_shift("snd_delay_sound_shift","0.01");
 // this forces the clock to resync on the next delayed/sync sound
@@ -4578,6 +4580,14 @@ void SND_Spatialize(channel_t *ch)
 
 		mono = 1.0;
 		bAttenuated = false;
+	}
+
+	// Voice of other players: the same in both ears, as in v34. With
+	// cl_voice_proximity it still gets quieter with distance, but is not
+	// panned to the side the speaker stands on.
+	if ( ch->entchannel >= CHAN_VOICE_BASE && ch->entchannel < CHAN_USER_BASE && !snd_voice_pan.GetBool() )
+	{
+		mono = 1.0;
 	}
 
 	// calculate gain based on distance, atmospheric attenuation, interposed objects
