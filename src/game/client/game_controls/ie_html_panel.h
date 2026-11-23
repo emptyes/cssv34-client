@@ -15,6 +15,7 @@
 
 #include <vgui_controls/Panel.h>
 #include "tier1/utlvector.h"
+#include "tier1/utlstring.h"
 
 class CIEBrowser;
 
@@ -59,6 +60,9 @@ private:
 	bool					m_bHasFrame;
 	float					m_flNextRender;
 	int						m_nLastHTMLState;
+	int						m_nLastHTMLWrites;
+	int						m_nLastHTMLBodyChars;
+	CUtlString				m_ShownHTML;			// HTML text the browser was given last
 };
 
 #endif // IE_HTML_PANEL_H

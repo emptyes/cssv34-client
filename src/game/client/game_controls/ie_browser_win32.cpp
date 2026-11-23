@@ -40,9 +40,6 @@
 #ifndef DISPID_BEFORENAVIGATE2
 #define DISPID_BEFORENAVIGATE2 250
 #endif
-#ifndef DISPID_NAVIGATECOMPLETE2
-#define DISPID_NAVIGATECOMPLETE2 252
-#endif
 #ifndef DISPID_DOCUMENTCOMPLETE
 #define DISPID_DOCUMENTCOMPLETE 259
 #endif
@@ -124,9 +121,10 @@ public:
 	void PostMouse( UINT msg, WPARAM wParam, int x, int y );
 	void Scroll( int nPixels );
 	void DisableDragging();
-	void WritePendingHTML();
-	void PollPendingHTML();
+	void WriteHTMLIfBlank( bool bCheckIdle );
 	int GetHTMLState() const { return m_nHTMLState; }
+	int GetHTMLWrites() const { return m_nHTMLWrites; }
+	int GetHTMLBodyChars() const { return m_nHTMLBodyChars; }
 
 	// IUnknown
 	STDMETHODIMP QueryInterface( REFIID riid, void **ppv );
@@ -213,10 +211,10 @@ private:
 	bool				m_bButtonDown;
 	DWORD				m_dwLastClickTick;	// GetTickCount() of the last click on the page
 	wchar_t				m_szPageHost[256];	// host of the page the game opened
-	BSTR				m_bstrPendingHTML;	// HTML text written into about:blank once it has loaded
-	bool				m_bNavCompleted;	// the last top level navigation has completed
-	DWORD				m_dwNavTick;		// GetTickCount() when it started
+	BSTR				m_bstrHTML;			// HTML text shown in about:blank (kept while the page is open)
 	int					m_nHTMLState;		// see CIEBrowser::GetHTMLState
+	int					m_nHTMLWrites;		// how many times it was written
+	int					m_nHTMLBodyChars;	// size of the body after the last check (diagnostics)
 	bool				m_bOleInitialized;
 
 	IOleObject			*m_pOleObject;
@@ -241,10 +239,10 @@ CIEBrowserHost::CIEBrowserHost()
 	m_bButtonDown = false;
 	m_dwLastClickTick = 0;
 	m_szPageHost[0] = 0;
-	m_bstrPendingHTML = NULL;
-	m_bNavCompleted = false;
-	m_dwNavTick = 0;
+	m_bstrHTML = NULL;
 	m_nHTMLState = 0;
+	m_nHTMLWrites = 0;
+	m_nHTMLBodyChars = -1;
 	m_bOleInitialized = false;
 	m_pOleObject = NULL;
 	m_pInPlaceObject = NULL;
@@ -364,27 +362,9 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 		}
 		return S_OK;
 
-	case DISPID_NAVIGATECOMPLETE2:
-		// args (reversed): pDisp, URL; the top level document exists from here on
-		if ( pDispParams && pDispParams->cArgs >= 2 )
-		{
-			VARIANT &frame = pDispParams->rgvarg[1];
-			if ( frame.vt == VT_DISPATCH && frame.pdispVal && m_pBrowser )
-			{
-				IUnknown *pFrame = NULL, *pTop = NULL;
-				frame.pdispVal->QueryInterface( IID_IUnknown, (void **)&pFrame );
-				m_pBrowser->QueryInterface( IID_IUnknown, (void **)&pTop );
-				if ( pFrame && pFrame == pTop )
-					m_bNavCompleted = true;
-				if ( pFrame ) pFrame->Release();
-				if ( pTop ) pTop->Release();
-			}
-		}
-		return S_OK;
-
 	case DISPID_DOCUMENTCOMPLETE:
 		// args (reversed): pDisp, URL
-		if ( m_bstrPendingHTML && pDispParams && pDispParams->cArgs >= 2 )
+		if ( m_bstrHTML && pDispParams && pDispParams->cArgs >= 2 )
 		{
 			// the top level about:blank has loaded: write the server's HTML into it
 			VARIANT &frame = pDispParams->rgvarg[1];
@@ -399,10 +379,7 @@ STDMETHODIMP CIEBrowserHost::Invoke( DISPID dispIdMember, REFIID, LCID, WORD, DI
 				if ( pTop ) pTop->Release();
 			}
 			if ( bTopLevel )
-			{
-				m_bNavCompleted = true;
-				WritePendingHTML();
-			}
+				WriteHTMLIfBlank( false );
 		}
 		DisableDragging();
 		return S_OK;
@@ -546,10 +523,10 @@ bool CIEBrowserHost::Create( int nWide, int nTall )
 
 void CIEBrowserHost::Destroy()
 {
-	if ( m_bstrPendingHTML )
+	if ( m_bstrHTML )
 	{
-		SysFreeString( m_bstrPendingHTML );
-		m_bstrPendingHTML = NULL;
+		SysFreeString( m_bstrHTML );
+		m_bstrHTML = NULL;
 	}
 
 	if ( m_pConnectionPoint )
@@ -626,12 +603,12 @@ void CIEBrowserHost::Navigate( const char *pszURL, BSTR bstrHTML )
 
 	// a new page replaces HTML text that hasn't been written yet; set before the
 	// navigation starts, in case about:blank completes right away
-	if ( m_bstrPendingHTML )
-		SysFreeString( m_bstrPendingHTML );
-	m_bstrPendingHTML = bstrHTML;
+	if ( m_bstrHTML )
+		SysFreeString( m_bstrHTML );
+	m_bstrHTML = bstrHTML;
 	m_nHTMLState = bstrHTML ? 1 : 0;
-	m_bNavCompleted = false;
-	m_dwNavTick = GetTickCount();
+	m_nHTMLWrites = 0;
+	m_nHTMLBodyChars = -1;
 
 	m_pBrowser->Navigate2( &url, &empty, &empty, &empty, &empty );
 	VariantClear( &url );
@@ -680,7 +657,7 @@ void CIEBrowserHost::ReleaseBitmap()
 
 bool CIEBrowserHost::Render( unsigned char *pRGBA, int nWide, int nTall )
 {
-	PollPendingHTML();
+	WriteHTMLIfBlank( true );
 
 	if ( !m_pViewObject || !pRGBA || nWide <= 0 || nTall <= 0 )
 		return false;
@@ -851,72 +828,86 @@ void CIEBrowserHost::NavigateHTML( BSTR bstrHTML )
 		return;
 	}
 
-	// written once about:blank has loaded (DISPID_DOCUMENTCOMPLETE); drops older pending HTML
+	// written once about:blank has loaded (see WriteHTMLIfBlank); replaces older text
 	Navigate( "about:blank", bstrHTML );
 }
 
-void CIEBrowserHost::WritePendingHTML()
+// The text is written whenever the top level page is an empty about:blank: after it
+// has loaded (events), and on every render in case an event didn't come or a later
+// about:blank load (several requests to show the MOTD) replaced the written page.
+void CIEBrowserHost::WriteHTMLIfBlank( bool bCheckIdle )
 {
-	BSTR bstrHTML = m_bstrPendingHTML;
-	m_bstrPendingHTML = NULL;
-	if ( !bstrHTML )
+	if ( !m_bstrHTML || !m_pBrowser || m_nHTMLWrites >= 8 )
 		return;
 
-	IDispatch *pDocDisp = NULL;
-	IHTMLDocument2 *pDoc = NULL;
-	if ( m_pBrowser && SUCCEEDED( m_pBrowser->get_Document( &pDocDisp ) ) && pDocDisp &&
-		SUCCEEDED( pDocDisp->QueryInterface( IID_IHTMLDocument2, (void **)&pDoc ) ) && pDoc )
+	if ( bCheckIdle )
 	{
-		SAFEARRAY *psa = SafeArrayCreateVector( VT_VARIANT, 0, 1 );
-		VARIANT *pVar = NULL;
-		if ( psa && SUCCEEDED( SafeArrayAccessData( psa, (void **)&pVar ) ) )
-		{
-			pVar->vt = VT_BSTR;
-			pVar->bstrVal = bstrHTML;	// owned by the array from here on
-			bstrHTML = NULL;
-			SafeArrayUnaccessData( psa );
-
-			HRESULT hr = pDoc->write( psa );
-			pDoc->close();
-			m_nHTMLState = SUCCEEDED( hr ) ? 2 : -3;
-		}
-		else
-			m_nHTMLState = -2;
-		if ( psa )
-			SafeArrayDestroy( psa );	// frees the BSTR
+		VARIANT_BOOL bBusy = VARIANT_TRUE;
+		READYSTATE rs = READYSTATE_UNINITIALIZED;
+		if ( FAILED( m_pBrowser->get_Busy( &bBusy ) ) || bBusy ||
+			FAILED( m_pBrowser->get_ReadyState( &rs ) ) || rs != READYSTATE_COMPLETE )
+			return;
 	}
-	else
-		m_nHTMLState = -1;	// no HTML document
-	if ( pDoc )
-		pDoc->Release();
-	if ( pDocDisp )
-		pDocDisp->Release();
-	SysFreeString( bstrHTML );
-}
 
-// In case the DocumentComplete event of about:blank doesn't come (or isn't recognized
-// as the top level one): write the text once about:blank is loaded and idle
-void CIEBrowserHost::PollPendingHTML()
-{
-	if ( !m_bstrPendingHTML || !m_pBrowser )
-		return;
-
-	// don't take the state of the previous page for the new one
-	if ( !m_bNavCompleted && GetTickCount() - m_dwNavTick < 1000 )
-		return;
-
-	VARIANT_BOOL bBusy = VARIANT_TRUE;
-	READYSTATE rs = READYSTATE_UNINITIALIZED;
-	if ( FAILED( m_pBrowser->get_Busy( &bBusy ) ) || bBusy ||
-		FAILED( m_pBrowser->get_ReadyState( &rs ) ) || rs != READYSTATE_COMPLETE )
-		return;
-
+	// only into about:blank; once a link led to a web page, the text is done with
 	BSTR bstrLocation = NULL;
 	bool bBlank = SUCCEEDED( m_pBrowser->get_LocationURL( &bstrLocation ) ) && bstrLocation &&
 		!_wcsnicmp( bstrLocation, L"about:", 6 );
 	SysFreeString( bstrLocation );
-	if ( bBlank )
-		WritePendingHTML();
+	if ( !bBlank )
+		return;
+
+	IDispatch *pDocDisp = NULL;
+	IHTMLDocument2 *pDoc = NULL;
+	if ( FAILED( m_pBrowser->get_Document( &pDocDisp ) ) || !pDocDisp ||
+		FAILED( pDocDisp->QueryInterface( IID_IHTMLDocument2, (void **)&pDoc ) ) || !pDoc )
+	{
+		if ( pDocDisp )
+			pDocDisp->Release();
+		if ( !bCheckIdle )
+			m_nHTMLState = -1;	// no HTML document yet
+		return;
+	}
+
+	// already shows the text?
+	int nBodyChars = 0;
+	IHTMLElement *pBody = NULL;
+	if ( SUCCEEDED( pDoc->get_body( &pBody ) ) && pBody )
+	{
+		BSTR bstrInner = NULL;
+		if ( SUCCEEDED( pBody->get_innerHTML( &bstrInner ) ) && bstrInner )
+			nBodyChars = (int)SysStringLen( bstrInner );
+		SysFreeString( bstrInner );
+		pBody->Release();
+	}
+	m_nHTMLBodyChars = nBodyChars;
+
+	if ( nBodyChars == 0 )
+	{
+		SAFEARRAY *psa = SafeArrayCreateVector( VT_VARIANT, 0, 1 );
+		VARIANT *pVar = NULL;
+		BSTR bstrCopy = SysAllocStringLen( m_bstrHTML, SysStringLen( m_bstrHTML ) );
+		if ( psa && bstrCopy && SUCCEEDED( SafeArrayAccessData( psa, (void **)&pVar ) ) )
+		{
+			pVar->vt = VT_BSTR;
+			pVar->bstrVal = bstrCopy;	// owned by the array from here on
+			bstrCopy = NULL;
+			SafeArrayUnaccessData( psa );
+
+			HRESULT hr = pDoc->write( psa );
+			pDoc->close();
+			m_nHTMLWrites++;
+			m_nHTMLState = SUCCEEDED( hr ) ? 2 : -3;
+		}
+		else
+			m_nHTMLState = -2;
+		SysFreeString( bstrCopy );
+		if ( psa )
+			SafeArrayDestroy( psa );	// frees the BSTR it owns
+	}
+
+	pDoc->Release();
+	pDocDisp->Release();
 }
 
 //-----------------------------------------------------------------------------
@@ -1012,6 +1003,16 @@ void CIEBrowser::NavigateHTML( const char *pszHTML )
 		m_bHTMLConvertFailed = true;
 }
 
+int CIEBrowser::GetHTMLWrites() const
+{
+	return m_pHost ? m_pHost->GetHTMLWrites() : 0;
+}
+
+int CIEBrowser::GetHTMLBodyChars() const
+{
+	return m_pHost ? m_pHost->GetHTMLBodyChars() : -1;
+}
+
 int CIEBrowser::GetHTMLState() const
 {
 	if ( m_bHTMLConvertFailed )
@@ -1058,6 +1059,8 @@ void CIEBrowser::Shutdown() {}
 void CIEBrowser::Navigate( const char * ) {}
 void CIEBrowser::NavigateHTML( const char * ) {}
 int CIEBrowser::GetHTMLState() const { return 0; }
+int CIEBrowser::GetHTMLWrites() const { return 0; }
+int CIEBrowser::GetHTMLBodyChars() const { return -1; }
 void CIEBrowser::SetSize( int, int ) {}
 bool CIEBrowser::Render( unsigned char *, int, int ) { return false; }
 void CIEBrowser::MouseMove( int, int ) {}

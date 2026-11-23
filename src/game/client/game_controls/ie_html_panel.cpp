@@ -30,6 +30,8 @@ CIEHTMLPanel::CIEHTMLPanel( Panel *pParent, const char *pszName ) : BaseClass( p
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
 	m_nLastHTMLState = 0;
+	m_nLastHTMLWrites = 0;
+	m_nLastHTMLBodyChars = -1;
 
 	SetPaintBackgroundEnabled( false );
 	SetMouseInputEnabled( true );
@@ -89,6 +91,7 @@ bool CIEHTMLPanel::OpenURL( const char *pszURL )
 	if ( !pszURL || !pszURL[0] || !CreateBrowser() )
 		return false;
 
+	m_ShownHTML.Clear();
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
 	m_pBrowser->Navigate( pszURL );
@@ -97,12 +100,23 @@ bool CIEHTMLPanel::OpenURL( const char *pszURL )
 
 bool CIEHTMLPanel::OpenHTML( const char *pszHTML )
 {
-	if ( !pszHTML || !pszHTML[0] || !CreateBrowser() )
+	if ( !pszHTML || !pszHTML[0] )
 		return false;
 
+	// the MOTD window asks to show the same text several times while it opens:
+	// loading about:blank again each time would only replace the page being written
+	if ( m_pBrowser && !V_strcmp( m_ShownHTML.Get(), pszHTML ) )
+		return true;
+
+	if ( !CreateBrowser() )
+		return false;
+
+	m_ShownHTML = pszHTML;
 	m_bHasFrame = false;
 	m_flNextRender = 0.0f;
 	m_nLastHTMLState = 0;
+	m_nLastHTMLWrites = 0;
+	m_nLastHTMLBodyChars = -1;
 	DevMsg( "HTML MOTD: showing %d bytes of HTML text\n", (int)V_strlen( pszHTML ) );
 	m_pBrowser->NavigateHTML( pszHTML );
 	return true;
@@ -115,6 +129,7 @@ void CIEHTMLPanel::CloseBrowser()
 		delete m_pBrowser;
 		m_pBrowser = NULL;
 	}
+	m_ShownHTML.Clear();
 	m_bHasFrame = false;
 }
 
@@ -142,6 +157,13 @@ void CIEHTMLPanel::OnThink()
 		static const char *s_pszStates[] = { "text not convertible", "write failed", "no memory", "no HTML document", "none", "waiting for about:blank", "written" };
 		if ( nHTMLState >= -4 && nHTMLState <= 2 )
 			DevMsg( "HTML MOTD: text state: %s\n", s_pszStates[ nHTMLState + 4 ] );
+	}
+	int nWrites = m_pBrowser->GetHTMLWrites(), nBodyChars = m_pBrowser->GetHTMLBodyChars();
+	if ( nWrites != m_nLastHTMLWrites || nBodyChars != m_nLastHTMLBodyChars )
+	{
+		m_nLastHTMLWrites = nWrites;
+		m_nLastHTMLBodyChars = nBodyChars;
+		DevMsg( "HTML MOTD: text written %d time(s), page body %d chars\n", nWrites, nBodyChars );
 	}
 
 	m_flNextRender = Plat_FloatTime() + IE_HTML_RENDER_INTERVAL;

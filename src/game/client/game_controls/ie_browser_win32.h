@@ -35,6 +35,8 @@ public:
 	// HTML text: 0 none, 1 waiting for about:blank, 2 written, < 0 failed
 	// (-1 no HTML document, -2 no memory, -3 write failed, -4 text not convertible)
 	int GetHTMLState() const;
+	int GetHTMLWrites() const;		// diagnostics: times the text was written
+	int GetHTMLBodyChars() const;	// diagnostics: size of the page body, -1 unknown
 	void SetSize( int nWide, int nTall );
 
 	// renders the current view into pRGBA (nWide * nTall * 4 bytes, opaque RGBA)
