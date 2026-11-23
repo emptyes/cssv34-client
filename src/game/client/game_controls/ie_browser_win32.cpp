@@ -884,26 +884,38 @@ void CIEBrowserHost::WriteHTMLIfBlank( bool bCheckIdle )
 
 	if ( nBodyChars == 0 )
 	{
-		SAFEARRAY *psa = SafeArrayCreateVector( VT_VARIANT, 0, 1 );
-		VARIANT *pVar = NULL;
-		BSTR bstrCopy = SysAllocStringLen( m_bstrHTML, SysStringLen( m_bstrHTML ) );
-		if ( psa && bstrCopy && SUCCEEDED( SafeArrayAccessData( psa, (void **)&pVar ) ) )
+		// Load the text as a page from a stream (the way Microsoft documents for the
+		// WebBrowser control): unlike document.write it goes through a normal load,
+		// with readyState and DocumentComplete. UTF-16 with a BOM, so no charset guessing.
+		HRESULT hr = E_FAIL;
+		IPersistStreamInit *pPSI = NULL;
+		if ( SUCCEEDED( pDocDisp->QueryInterface( IID_IPersistStreamInit, (void **)&pPSI ) ) && pPSI )
 		{
-			pVar->vt = VT_BSTR;
-			pVar->bstrVal = bstrCopy;	// owned by the array from here on
-			bstrCopy = NULL;
-			SafeArrayUnaccessData( psa );
+			UINT nChars = SysStringLen( m_bstrHTML );
+			SIZE_T cb = ( (SIZE_T)nChars + 1 ) * sizeof( wchar_t );
+			HGLOBAL hMem = GlobalAlloc( GMEM_MOVEABLE, cb );
+			wchar_t *pMem = hMem ? (wchar_t *)GlobalLock( hMem ) : NULL;
+			if ( pMem )
+			{
+				pMem[0] = 0xFEFF;
+				memcpy( pMem + 1, m_bstrHTML, nChars * sizeof( wchar_t ) );
+				GlobalUnlock( hMem );
 
-			HRESULT hr = pDoc->write( psa );
-			pDoc->close();
-			m_nHTMLWrites++;
-			m_nHTMLState = SUCCEEDED( hr ) ? 2 : -3;
+				IStream *pStream = NULL;
+				if ( SUCCEEDED( CreateStreamOnHGlobal( hMem, TRUE, &pStream ) ) && pStream )
+				{
+					hMem = NULL;	// owned by the stream
+					if ( SUCCEEDED( pPSI->InitNew() ) )
+						hr = pPSI->Load( pStream );
+					pStream->Release();
+				}
+			}
+			if ( hMem )
+				GlobalFree( hMem );
+			pPSI->Release();
 		}
-		else
-			m_nHTMLState = -2;
-		SysFreeString( bstrCopy );
-		if ( psa )
-			SafeArrayDestroy( psa );	// frees the BSTR it owns
+		m_nHTMLWrites++;
+		m_nHTMLState = SUCCEEDED( hr ) ? 2 : -3;
 	}
 
 	pDoc->Release();
